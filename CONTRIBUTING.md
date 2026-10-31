@@ -34,7 +34,7 @@ Thank you for your interest in contributing to the Chaining MCP Server! This doc
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/1999AZZAR/chaining-mcp-server.git
+   git clone https://github.com/Hela-Ecosystem/chaining-mcp-server.git
    cd chaining-mcp-server
    ```
 

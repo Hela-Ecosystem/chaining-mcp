@@ -45,7 +45,7 @@ export class LLMManager {
       maxTokens: parseInt(process.env.CHAINING_LLM_MAX_TOKENS || '1024', 10),
       timeoutMs: Math.min(parseInt(process.env.CHAINING_LLM_TIMEOUT_MS || '4000', 10), 5000),
       systemPrompt: process.env.CHAINING_LLM_SYSTEM_PROMPT,
-      appUrl: process.env.CHAINING_LLM_APP_URL || 'https://github.com/1999AZZAR/hela-mcp-ecosystem',
+      appUrl: process.env.CHAINING_LLM_APP_URL || 'https://github.com/Hela-Ecosystem/hela-mcp-ecosystem',
       appName: process.env.CHAINING_LLM_APP_NAME || 'hela-mitosis',
     };
   }

@@ -1,6 +1,6 @@
 # Enterprise Chaining MCP Server (HeLa Mitosis)
 
-> **Part of the [HeLa MCP Ecosystem](https://github.com/1999AZZAR/hela-mcp-ecosystem)** — this server is **HeLa Mitosis (`hela-mitosis`)**, the *Orchestrator* component of the HeLa cellular architecture.
+> **Part of the [HeLa MCP Ecosystem](https://github.com/Hela-Ecosystem/hela-mcp-ecosystem)** — this server is **HeLa Mitosis (`hela-mitosis`)**, the *Orchestrator* component of the HeLa cellular architecture.
 
 A Model Context Protocol (MCP) server that orchestrates other MCP servers: discovers tools, plans execution with a **bundled local tool-calling model (Needle 3)**, executes through a registry-guarded workflow engine, records reasoning in an agent-state store, and escalates to OpenRouter only when the local model is not confident. Also ships time management, prompt/resource libraries, skills-catalog management, memory graph, monitoring, and security guidance.
 
