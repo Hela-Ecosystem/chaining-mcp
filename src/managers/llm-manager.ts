@@ -37,9 +37,15 @@ export class LLMManager {
   private cacheTtlMs = 300000; // 5 minutes
 
   constructor() {
+    const rawEnabled = process.env.CHAINING_LLM_ENABLED;
+    const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const enabled = rawEnabled !== undefined && rawEnabled !== ''
+      ? rawEnabled.toLowerCase() === 'true'
+      : Boolean(apiKey);
+
     this.config = {
-      enabled: (process.env.CHAINING_LLM_ENABLED || '').toLowerCase() === 'true',
-      apiKey: process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY,
+      enabled,
+      apiKey,
       model: process.env.CHAINING_LLM_MODEL || 'openrouter/free',
       baseUrl: process.env.CHAINING_LLM_BASE_URL || 'https://openrouter.ai/api/v1',
       maxTokens: parseInt(process.env.CHAINING_LLM_MAX_TOKENS || '1024', 10),
