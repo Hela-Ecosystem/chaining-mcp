@@ -50,3 +50,7 @@ Flat. No tables or blockquotes unless requested. Use numbered lists strictly for
 ## 6. Scripts & Helpers
 - `scripts/audit.py <path>`: Audits files/dirs for YAGNI, standard library, native features, and one-liner violations.
 - `scripts/install-hooks.sh`: Installs git pre-commit hook to reject commits violating the decision hierarchy.
+
+## Hela distribution
+
+This is internal Hela tooling bundled in `chaining-mcp/skills/caveman`. Use it through the MCP skill catalog; it is not maintained as a standalone skill repository.

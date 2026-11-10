@@ -160,4 +160,4 @@ Invoke with `$blotcat-illustrations` in any prompt when the skill is installed a
 
 ## License
 
-Internal tooling. Not for redistribution.
+Internal Hela tooling. Distributed only as part of Hela MCP packages; not maintained as a standalone skill repository.

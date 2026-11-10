@@ -6,6 +6,10 @@ Mema Vault stores local credentials in SQLite. Passwords are encrypted with Fern
 
 The vault does not send data over the network.
 
+## Hela distribution
+
+This is internal Hela tooling bundled in `chaining-mcp/skills/mema-vault`. Use it through the MCP skill catalog or a local checked-out Hela package. Keep vault databases, salts, backups, and master keys outside the repository; no runtime vault state is part of the bundle.
+
 ## Contents
 
 - [Requirements](#requirements)

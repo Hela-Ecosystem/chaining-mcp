@@ -17,15 +17,9 @@ An agent skill for drafting and editing technical prose with less promotional fi
 
 The skill treats common AI-writing patterns as editing signals, not proof of authorship or universal bans. It keeps valid terminology and natural structures when they are the clearest choice.
 
-## Install
+## Hela distribution
 
-Clone the repository into your agent's skills directory. For clients that discover skills from `~/.agents/skills`:
-
-```bash
-git clone https://github.com/1999AZZAR/human-writing-skill.git ~/.agents/skills/human-writing
-```
-
-Other clients may use a different skills directory. Check the client's documentation, then restart or reload it so the new skill is discovered. Keep `SKILL.md` and `references/` together so the relative links resolve; `agents/openai.yaml` provides optional interface metadata for compatible clients.
+This skill is bundled as internal Hela tooling in `chaining-mcp/skills/human-writing`. Use the MCP skill catalog instead of installing a separate standalone repository. Keep `SKILL.md` and `references/` together so the relative links resolve; `agents/openai.yaml` provides optional interface metadata for compatible clients.
 
 ## Use
 
