@@ -1,7 +1,7 @@
 # Enterprise Chaining MCP Server (HeLa Mitosis)
 
 <!-- hela:version:start -->
-**MCP server:** `hela-mitosis` · **Version:** `3.0.0` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
+**MCP server:** `hela-mitosis` · **Version:** `3.0.1` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
 <!-- hela:version:end -->
 
 > **Part of the [HeLa MCP Ecosystem](https://github.com/Hela-Ecosystem/hela-mcp-ecosystem)** — this server is **HeLa Mitosis (`hela-mitosis`)**, the *Orchestrator* component of the HeLa cellular architecture.

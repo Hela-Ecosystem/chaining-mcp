@@ -54,7 +54,7 @@ export class HttpAdapter {
             server: 'chaining-mcp',
             role: 'hela-mitosis',
             transport: 'stateless-http',
-            version: '3.0.0',
+            version: '3.0.1',
             protocolVersion: '2026-07-28',
           }));
           return;
@@ -69,7 +69,7 @@ export class HttpAdapter {
           });
           res.end(JSON.stringify({
             name: 'chaining-mcp-server',
-            version: '3.0.0',
+            version: '3.0.1',
             protocolVersion: '2026-07-28',
             role: 'hela-mitosis',
             capabilities: {
@@ -218,7 +218,7 @@ export class HttpAdapter {
                 id,
                 result: {
                   name: 'chaining-mcp-server',
-                  version: '3.0.0',
+                  version: '3.0.1',
                   protocolVersion: '2026-07-28',
                   role: 'hela-mitosis',
                   capabilities: {
@@ -305,9 +305,12 @@ export class HttpAdapter {
   }
 
   async close(): Promise<void> {
-    if (this.httpServer) {
+    const httpServer = this.httpServer;
+    this.httpServer = undefined;
+    if (httpServer) {
       await new Promise<void>((resolve) => {
-        this.httpServer!.close(() => resolve());
+        httpServer.close(() => resolve());
+        httpServer.closeAllConnections();
       });
     }
   }
