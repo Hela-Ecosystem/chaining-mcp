@@ -90,7 +90,7 @@ export class ChainingMCPServer {
     const server = new Server(
       {
         name: 'chaining-mcp-server',
-        version: '3.0.1',
+        version: '3.0.2',
       },
       {
         capabilities: {

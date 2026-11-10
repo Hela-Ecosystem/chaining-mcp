@@ -2,6 +2,16 @@
 
 All notable changes to this project.
 
+## [3.0.2] - 2026-11-11
+
+### Added
+- Bundled `human-writing`, `caveman`, `mema-vault`, and `blotcat-illustrations` as read-only internal Hela skills.
+- Added packaged skill-file loading through `get_skill` without executing bundled scripts.
+
+### Security
+- Removed personal filesystem paths, Git identity data, and personal-name examples from distributed skill files.
+- Excluded Mema Vault databases, salts, backups, environment files, and memory databases from the bundle.
+
 ## [3.0.1] - 2026-11-11
 
 ### Added
