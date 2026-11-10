@@ -87,6 +87,7 @@ describe('M8 handler surface', () => {
       assert.equal(search.skills[0].name, 'deploy-bot');
       const get = await h.handleToolCall('get_skill', { name: 'weather-helper' });
       assert.equal(get.ok, true);
+    assert.equal(get.file, 'SKILL.md');
       assert.ok(get.content.includes('plain words'));
       const miss = await h.handleToolCall('get_skill', { name: 'ghost' });
       assert.equal(miss.ok, false);

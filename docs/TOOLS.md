@@ -46,7 +46,7 @@ Get a specific resource set by ID
 
 ## `get_skill`
 
-Load a skill's full instructions (SKILL.md body) plus its file manifest, for injection into agent context or harness use.
+Load a skill file (SKILL.md by default) plus its file manifest for agent context or harness use. Read-only; never executes skill scripts. Pass `file` to load a packaged reference or script by its relative path.
 
 ## `get_tool_chain_analysis`
 

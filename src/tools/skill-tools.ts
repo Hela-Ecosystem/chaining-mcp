@@ -21,11 +21,12 @@ export const skillTools: Tool[] = [
   },
   {
     name: 'get_skill',
-    description: 'Load a skill\'s full instructions (SKILL.md body) plus its file manifest, for injection into agent context or harness use.',
+    description: 'Load a skill file (SKILL.md by default) plus its manifest for agent context or harness use. Read-only; never executes skill scripts.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Skill name from list_skills/search_skills' },
+        file: { type: 'string', description: 'Optional relative file inside the skill, such as references/style-dna.md or scripts/vault.py' },
         maxChars: { type: 'number', minimum: 500, maximum: 60000, default: 8000, description: 'Truncate body to this many characters' },
       },
       required: ['name'],

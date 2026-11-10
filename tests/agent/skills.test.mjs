@@ -34,6 +34,7 @@ describe('SkillDiscovery', () => {
     assert.ok(got.content.includes('Blue-green'));
     assert.deepEqual(got.files, ['SKILL.md']);
     assert.equal(d.get('ghost', [FIXTURES]), undefined);
+    assert.equal(d.get('deploy-bot', [FIXTURES], '../outside'), undefined);
   });
 });
 

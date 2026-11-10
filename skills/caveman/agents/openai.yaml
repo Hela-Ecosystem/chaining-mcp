@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caveman Optimizer"
+  short_description: "Maximum token efficiency via RTK and lean syntax."
+  default_prompt: "Activate Caveman mode for maximum token efficiency."

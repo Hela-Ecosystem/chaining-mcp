@@ -99,7 +99,7 @@ They're reachable four ways:
 1. **Tools:** `get_prompt` / `search_prompts` / `get_resource_set` / `search_resource_sets`
 2. **Resources:** `chaining://prompts`, `chaining://resources`, `chaining://prompts/overview`, `chaining://tool-chains`, `chaining://tool-chains/overview`
 3. **Agent context:** task-relevant prompts (keyword + `expectedTools` overlap, top-2, ≤600 chars) are injected into planning and turn-1 agent context
-4. **Skills catalog:** `list_skills` / `search_skills` / `get_skill` / `suggest_skill_chain` over the opencode AgentSkills layout
+4. **Skills catalog:** `list_skills` / `search_skills` / `get_skill` / `suggest_skill_chain` over bundled and local AgentSkills; `get_skill` can load packaged reference files without executing scripts
 
 ### Prebuilt Prompts
 
@@ -180,7 +180,7 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 | `NEEDLE_TOOL_INDEX_PATH` | `assets/needle/tools.idx` | Persisted tool-embedding cache (engine fingerprints by schema+model) |
 | `NEEDLE_CONFIDENCE_THRESHOLD` | `0.6` | Act at/above, escalate below |
 | `NEEDLE_PORT` / `NEEDLE_USE_SERVER` | `18080` / `true` | Serve-mode port + toggle (`false` = one-shot spawn) |
-| `MITOSIS_SKILLS_DIRS` | `~/.config/opencode/skills` | Colon-separated skills catalog dirs |
+| `MITOSIS_SKILLS_DIRS` | `~/.config/opencode/skills` + bundled `skills/` | Colon-separated skills catalog dirs; setting it replaces the defaults |
 | `AGENT_ESCALATION_ENABLED` | `true` | `false` disables OpenRouter escalation |
 | `AGENT_MAX_ESCALATIONS` | `1` | One-way escalation budget per run |
 | `AGENT_REPEATED_FAILURE_THRESHOLD` | `3` | Consecutive tool errors that force escalation |
@@ -229,7 +229,7 @@ src/
 ├── managers/                        # workflow-orchestrator (transport seam, real retries, cancel), time, memory, reliability, llm
 ├── agent/                           # agent.ts (loop/step/planner/decision), needle-provider, openrouter-provider,
 │                                    # state, escalation, workflow bridge, guidance, diagnostics
-├── skills/                          # skill-discovery (frontmatter, search, TTL cache, read-only)
+├── skills/                          # bundled AgentSkills + skill-discovery catalog
 ├── integrations/                    # awesome-copilot (local catalog)
 ├── prompts/                         # 40 prompts + 12 resource sets + registry
 ├── handlers/                        # request-handlers (dispatcher, per-tool timeouts, honest failures)

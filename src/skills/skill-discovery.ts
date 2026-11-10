@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 export interface SkillInfo {
   name: string;
@@ -19,7 +20,11 @@ function defaultSkillDirs(): string[] {
   if (process.env.MITOSIS_SKILLS_DIRS) {
     return process.env.MITOSIS_SKILLS_DIRS.split(':').filter(Boolean);
   }
-  return [join(homedir(), '.config', 'opencode', 'skills')];
+  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  return [
+    join(homedir(), '.config', 'opencode', 'skills'),
+    join(packageRoot, 'skills'),
+  ];
 }
 
 function parseFrontmatter(text: string): { data: Record<string, string>; body: string } {
@@ -90,6 +95,7 @@ export class SkillDiscovery {
 
   private scanFresh(dirs: string[]): SkillInfo[] {
     const skills: SkillInfo[] = [];
+    const seen = new Set<string>();
     for (const dir of dirs) {
       let entries: string[];
       try {
@@ -105,10 +111,13 @@ export class SkillDiscovery {
         try {
           const text = readFileSync(skillFile, 'utf8');
           const { data, body } = parseFrontmatter(text);
+          const name = data.name || e;
+          if (seen.has(name)) continue;
           const files: string[] = [];
           listFilesRecursive(skillDir, skillDir, files);
+          seen.add(name);
           skills.push({
-            name: data.name || e,
+            name,
             description: data.description || '',
             shortDescription: data['short-description'],
             path: skillDir,
@@ -137,11 +146,12 @@ export class SkillDiscovery {
       .map(({ s }) => s);
   }
 
-  get(name: string, dirs?: string[]): SkillDetail | undefined {
+  get(name: string, dirs?: string[], file = 'SKILL.md'): SkillDetail | undefined {
     const found = this.scan(dirs).find(s => s.name === name);
     if (!found) return undefined;
+    if (!file || file.startsWith('/') || file.includes('\\') || file.split('/').includes('..') || !found.files.includes(file)) return undefined;
     try {
-      const text = readFileSync(join(found.path, 'SKILL.md'), 'utf8');
+      const text = readFileSync(join(found.path, file), 'utf8');
       const { body } = parseFrontmatter(text);
       return { ...found, content: body };
     } catch {
