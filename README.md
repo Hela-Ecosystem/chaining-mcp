@@ -250,7 +250,7 @@ Discovery scans your MCP config files, connects to real servers, and executes th
 
 ## License
 
-MIT License — see LICENSE file for details.
+GPL-3.0-or-later License — see LICENSE file for details.
 
 ## Contributing
 

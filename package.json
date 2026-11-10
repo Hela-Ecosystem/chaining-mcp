@@ -3,7 +3,7 @@
   "version": "3.0.0",
   "description": "Comprehensive MCP server with intelligent tool chaining, route optimization, persistent memory, sequential thinking, and time management",
   "author": "Azzar Budiyanto",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
