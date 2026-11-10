@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.fernet import Fernet, InvalidToken
 import base64
 
-BASE_DIR = Path("/home/azzar/.agents/skills/mema-vault")
+BASE_DIR = Path(__file__).resolve().parent.parent
 LOCAL_DB = BASE_DIR / "data/vault.db"
 LOCAL_SALT = BASE_DIR / "data/salt.bin"
 

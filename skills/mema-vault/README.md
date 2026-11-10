@@ -70,14 +70,14 @@ Do not place the master key in a command argument. Avoid committing it to shell 
 Interactive use prompts for the password:
 
 ```bash
-python3 scripts/vault.py set github azzar --meta "personal account"
+python3 scripts/vault.py set github local-user --meta "personal account"
 ```
 
 For automation, pass the password through stdin:
 
 ```bash
 printf '%s\n' "$GITHUB_TOKEN" | \
-  python3 scripts/vault.py set github azzar --password-stdin
+  python3 scripts/vault.py set github local-user --password-stdin
 ```
 
 Using stdin keeps the password out of the process argument list. Take care with shell history when constructing pipelines.
@@ -108,7 +108,7 @@ validation. List kinds with `python3 scripts/vault.py types`.
 ```bash
 # credit/debit card (number Luhn-checked, expiry MM/YY, cvv 3-4 digits)
 python3 scripts/vault.py store bca --kind card \
-  --field cardholder="Azzar" --secret-field number \
+  --field cardholder="Example User" --secret-field number \
   --field expiry="08/28" --field cvv="123"
 
 # alamat (street + city required)

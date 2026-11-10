@@ -9,13 +9,19 @@ if [ -z "$HOOKS_DIR" ]; then
 fi
 
 PRE_COMMIT_FILE="$HOOKS_DIR/pre-commit"
-AUDIT_SCRIPT="/home/azzar/.agents/skills/caveman/scripts/audit.py"
 
 cat << 'EOF' > "$PRE_COMMIT_FILE"
 #!/usr/bin/env bash
 # Pre-commit hook to verify caveman rules (YAGNI, stdlib, native features)
 
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(py|js|ts|jsx|tsx|md)$')
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+AUDIT_SCRIPT="${CAVEMAN_AUDIT_SCRIPT:-$REPO_ROOT/skills/caveman/scripts/audit.py}"
+if [ ! -f "$AUDIT_SCRIPT" ]; then
+    echo "Caveman audit script not found: $AUDIT_SCRIPT"
+    exit 1
+fi
 
 if [ -z "$STAGED_FILES" ]; then
     exit 0
@@ -24,7 +30,7 @@ fi
 VIOLATIONS=0
 for FILE in $STAGED_FILES; do
     if [ -f "$FILE" ]; then
-        python3 /home/azzar/.agents/skills/caveman/scripts/audit.py "$FILE"
+        python3 "$AUDIT_SCRIPT" "$FILE"
         if [ $? -ne 0 ]; then
             VIOLATIONS=$((VIOLATIONS + 1))
         fi
