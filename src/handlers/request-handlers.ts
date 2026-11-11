@@ -866,7 +866,7 @@ export class RequestHandlers {
 
       case 'get_skill': {
         const file = typeof args.file === 'string' && args.file.trim() ? args.file.trim() : 'SKILL.md';
-        const detail = catalog.get(String(args.name || ''), undefined, file);
+        const detail = catalog.get(String(args.name || ''), undefined);
         if (!detail) return { ok: false, error: `unknown skill '${args.name}'` };
         const maxChars = Math.min(Math.max(Number(args.maxChars) || 8000, 500), 60000);
         return {
