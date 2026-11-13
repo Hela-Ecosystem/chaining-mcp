@@ -2,6 +2,11 @@
 
 All notable changes to this project.
 
+## [3.0.3] - 2026-11-13
+
+### Fixed
+- Replaced Unix-only cleanup with the portable Node maintenance runner.
+
 ## [3.0.2] - 2026-11-11
 
 ### Added
