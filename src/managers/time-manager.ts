@@ -1,5 +1,10 @@
 // Enhanced JavaScript implementation of the Python time server
-// Uses native JavaScript Date API with proper timezone handling
+// Uses native JavaScript Date API with proper timezone handling.
+//
+// All conversions work from absolute instants: a wall-clock time is resolved to
+// a UTC instant using the target zone's offset at that instant (iterated twice so
+// DST transitions settle), then re-rendered in whichever zone is requested.
+// This keeps results independent of the machine's own TZ setting.
 
 export interface TimeResult {
   timezone: string;
@@ -7,12 +12,22 @@ export interface TimeResult {
   day_of_week: string;
   is_dst: boolean;
 }
-
 export interface TimeConversionResult {
   source: TimeResult;
   target: TimeResult;
   time_difference: string;
 }
+
+interface ZonedParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+const MINUTE_MS = 60_000;
 
 export class TimeManager {
   private getLocalTimezone(): string {
@@ -32,13 +47,101 @@ export class TimeManager {
     }
   }
 
-  private formatTimeDifference(hoursDiff: number): string {
-    if (Number.isInteger(hoursDiff)) {
-      return `${hoursDiff >= 0 ? '+' : ''}${hoursDiff.toFixed(1)}h`;
-    } else {
-      // For fractional hours like Nepal's UTC+5:45
-      return `${hoursDiff >= 0 ? '+' : ''}${hoursDiff.toFixed(2).replace(/\.?0+$/, '')}h`;
+  /** Wall-clock parts of an absolute instant, as seen in `timezone`. */
+  private zonedParts(date: Date, timezone: string): ZonedParts {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(date);
+
+    const get = (type: string): number => {
+      const value = parts.find((p) => p.type === type)?.value;
+      return value === undefined ? 0 : Number(value);
+    };
+
+    return {
+      year: get('year'),
+      month: get('month'),
+      day: get('day'),
+      // Some engines render midnight as "24" even with hour12: false.
+      hour: get('hour') % 24,
+      minute: get('minute'),
+      second: get('second')
+    };
+  }
+
+  /** UTC offset of `timezone` at a specific instant, in minutes (east positive). */
+  private offsetMinutesAt(date: Date, timezone: string): number {
+    const p = this.zonedParts(date, timezone);
+    const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    const instant = Math.floor(date.getTime() / 1000) * 1000;
+    return Math.round((asUtc - instant) / MINUTE_MS);
+  }
+
+  /** Resolve a wall-clock time in `timezone` to the matching absolute instant. */
+  private wallTimeToInstant(
+    timezone: string,
+    year: number,
+    month: number,
+    day: number,
+    hour: number,
+    minute: number
+  ): Date {
+    const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+    let guess = wallAsUtc;
+
+    // Two passes are enough to settle even across a DST boundary.
+    for (let i = 0; i < 3; i += 1) {
+      const offset = this.offsetMinutesAt(new Date(guess), timezone);
+      const next = wallAsUtc - offset * MINUTE_MS;
+      if (next === guess) break;
+      guess = next;
     }
+
+    return new Date(guess);
+  }
+
+  private dayOfWeek(date: Date, timezone: string): string {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      weekday: 'long'
+    }).format(date);
+  }
+
+  /** Render an instant as ISO-8601 with the zone's real offset. */
+  private formatIso(date: Date, timezone: string): string {
+    const p = this.zonedParts(date, timezone);
+    const offset = this.offsetMinutesAt(date, timezone);
+    const ms = String(date.getUTCMilliseconds()).padStart(3, '0');
+    return (
+      `${String(p.year).padStart(4, '0')}-${this.pad(p.month)}-${this.pad(p.day)}` +
+      `T${this.pad(p.hour)}:${this.pad(p.minute)}:${this.pad(p.second)}.${ms}` +
+      this.formatOffset(offset)
+    );
+  }
+
+  private pad(value: number): string {
+    return String(value).padStart(2, '0');
+  }
+
+  private formatOffset(minutes: number): string {
+    const sign = minutes >= 0 ? '+' : '-';
+    const abs = Math.abs(minutes);
+    return `${sign}${this.pad(Math.floor(abs / 60))}:${this.pad(abs % 60)}`;
+  }
+
+  private formatTimeDifference(minutes: number): string {
+    const sign = minutes >= 0 ? '+' : '-';
+    const abs = Math.abs(minutes);
+    const hours = Math.floor(abs / 60);
+    const remainder = abs % 60;
+    return remainder === 0 ? `${sign}${hours}h` : `${sign}${hours}h${this.pad(remainder)}m`;
   }
 
   getCurrentTime(timezone: string): TimeResult {
@@ -48,43 +151,11 @@ export class TimeManager {
 
     const now = new Date();
 
-    // Create a date formatter for the specific timezone
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
-
-    const parts = formatter.formatToParts(now);
-    const year = parts.find(p => p.type === 'year')?.value || '2024';
-    const month = parts.find(p => p.type === 'month')?.value || '01';
-    const day = parts.find(p => p.type === 'day')?.value || '01';
-    const hour = parts.find(p => p.type === 'hour')?.value || '00';
-    const minute = parts.find(p => p.type === 'minute')?.value || '00';
-    const second = parts.find(p => p.type === 'second')?.value || '00';
-
-    const timeInTimezone = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
-
-    // Get day of week
-    const dayFormatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      weekday: 'long'
-    });
-    const dayOfWeek = dayFormatter.format(now);
-
-    // Calculate DST status
-    const isDST = this.isDST(now, timezone);
-
     return {
-      timezone: timezone,
-      datetime: timeInTimezone.toISOString().replace('Z', this.formatOffset(this.getTimezoneOffset(timezone) / (1000 * 60 * 60))),
-      day_of_week: dayOfWeek,
-      is_dst: isDST
+      timezone,
+      datetime: this.formatIso(now, timezone),
+      day_of_week: this.dayOfWeek(now, timezone),
+      is_dst: this.isDST(now, timezone)
     };
   }
 
@@ -99,90 +170,61 @@ export class TimeManager {
     // Parse time string (HH:MM format)
     const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2})$/);
     if (!timeMatch) {
-      throw new Error("Invalid time format. Expected HH:MM [24-hour format]");
+      throw new Error('Invalid time format. Expected HH:MM [24-hour format]');
     }
 
-    const [, hours, minutes] = timeMatch;
-    const hour = parseInt(hours, 10);
-    const minute = parseInt(minutes, 10);
+    const hour = parseInt(timeMatch[1], 10);
+    const minute = parseInt(timeMatch[2], 10);
 
     if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-      throw new Error("Invalid time values");
+      throw new Error('Invalid time values');
     }
 
-    // Create a date for today with the specified time in source timezone
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // "Today" means today in the source timezone, not the host machine's zone.
+    const today = this.zonedParts(new Date(), sourceTimezone);
+    const instant = this.wallTimeToInstant(
+      sourceTimezone,
+      today.year,
+      today.month,
+      today.day,
+      hour,
+      minute
+    );
 
-    // Create the source time by combining today's date with the specified time
-    const sourceTime = new Date(today.getTime() + hour * 60 * 60 * 1000 + minute * 60 * 1000);
-
-    // Convert to target timezone using proper timezone conversion
-    const targetTime = new Date(sourceTime.toLocaleString("en-US", { timeZone: targetTimezone }));
-
-    // Calculate timezone offsets
-    const sourceOffset = this.getTimezoneOffset(sourceTimezone);
-    const targetOffset = this.getTimezoneOffset(targetTimezone);
-    const hoursDiff = (targetOffset - sourceOffset) / (1000 * 60 * 60);
-
-    // Format day of week for both times
-    const sourceDayFormatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: sourceTimezone,
-      weekday: 'long'
-    });
-    const targetDayFormatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: targetTimezone,
-      weekday: 'long'
-    });
+    const sourceOffset = this.offsetMinutesAt(instant, sourceTimezone);
+    const targetOffset = this.offsetMinutesAt(instant, targetTimezone);
 
     return {
       source: {
         timezone: sourceTimezone,
-        datetime: sourceTime.toISOString().replace('Z', this.formatOffset(sourceOffset / (1000 * 60 * 60))),
-        day_of_week: sourceDayFormatter.format(sourceTime),
-        is_dst: this.isDST(sourceTime, sourceTimezone)
+        datetime: this.formatIso(instant, sourceTimezone),
+        day_of_week: this.dayOfWeek(instant, sourceTimezone),
+        is_dst: this.isDST(instant, sourceTimezone)
       },
       target: {
         timezone: targetTimezone,
-        datetime: targetTime.toISOString().replace('Z', this.formatOffset(targetOffset / (1000 * 60 * 60))),
-        day_of_week: targetDayFormatter.format(targetTime),
-        is_dst: this.isDST(targetTime, targetTimezone)
+        datetime: this.formatIso(instant, targetTimezone),
+        day_of_week: this.dayOfWeek(instant, targetTimezone),
+        is_dst: this.isDST(instant, targetTimezone)
       },
-      time_difference: this.formatTimeDifference(hoursDiff)
+      time_difference: this.formatTimeDifference(targetOffset - sourceOffset)
     };
   }
 
-  private getTimezoneOffset(timezone: string): number {
-    const now = new Date();
-    const utcTime = new Date(now.toLocaleString("en-US", { timeZone: "UTC" }));
-    const localTime = new Date(now.toLocaleString("en-US", { timeZone: timezone }));
-    return localTime.getTime() - utcTime.getTime();
-  }
-
-  private formatOffset(hours: number): string {
-    const sign = hours >= 0 ? '+' : '-';
-    const absHours = Math.abs(hours);
-    const wholeHours = Math.floor(absHours);
-    const minutes = Math.round((absHours - wholeHours) * 60);
-
-    if (minutes === 0) {
-      return `${sign}${wholeHours.toString().padStart(2, '0')}:00`;
-    } else {
-      return `${sign}${wholeHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-    }
-  }
-
+  /**
+   * A zone observes DST when its January and July offsets differ and the
+   * instant's own offset is the larger (DST) one. Southern-hemisphere zones
+   * therefore report correctly too.
+   */
   private isDST(date: Date, timezone: string): boolean {
     try {
-      // Create dates for January and July to compare offsets
-      const jan = new Date(date.getFullYear(), 0, 1);
-      const jul = new Date(date.getFullYear(), 6, 1);
+      const { year } = this.zonedParts(date, timezone);
+      const january = this.offsetMinutesAt(new Date(Date.UTC(year, 0, 1, 12)), timezone);
+      const july = this.offsetMinutesAt(new Date(Date.UTC(year, 6, 1, 12)), timezone);
 
-      const janOffset = this.getTimezoneOffset(timezone);
-      const julOffset = this.getTimezoneOffset(timezone);
+      if (january === july) return false;
 
-      // If July offset is different from January, DST is likely in effect
-      return Math.abs(julOffset) !== Math.abs(janOffset);
+      return this.offsetMinutesAt(date, timezone) > Math.min(january, july);
     } catch {
       return false;
     }

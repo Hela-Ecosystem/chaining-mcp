@@ -27,8 +27,10 @@ function defaultSkillDirs(): string[] {
   ];
 }
 
-function parseFrontmatter(text: string): { data: Record<string, string>; body: string } {
+function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
   const data: Record<string, string> = {};
+  // Normalize Windows checkouts before parsing frontmatter delimiters and keys.
+  const text = raw.replace(/\r\n?/g, '\n');
   if (!text.startsWith('---')) return { data, body: text };
   const end = text.indexOf('\n---', 3);
   if (end < 0) return { data, body: text };
