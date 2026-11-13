@@ -1,6 +1,6 @@
 # HeLa Mitosis: canonical tools
 
-Server version **3.0.0**. Generated from the ecosystem schema catalog; regenerate with `npm run docs:generate -- --servers` in the ecosystem checkout.
+Server version **3.0.3**. Generated from the ecosystem schema catalog; regenerate with `npm run docs:generate -- --servers` in the ecosystem checkout.
 
 Only names advertised by `tools/list` are listed here. Older aliases in migration examples are not additional tools. Runtime namespace prefixes are optional and do not change these server-local names.
 
@@ -46,7 +46,7 @@ Get a specific resource set by ID
 
 ## `get_skill`
 
-Load a skill file (SKILL.md by default) plus its file manifest for agent context or harness use. Read-only; never executes skill scripts. Pass `file` to load a packaged reference or script by its relative path.
+Load a skill file (SKILL.md by default) plus its manifest for agent context or harness use. Read-only; never executes skill scripts.
 
 ## `get_tool_chain_analysis`
 
