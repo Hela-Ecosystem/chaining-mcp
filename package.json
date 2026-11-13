@@ -12,7 +12,7 @@
     "prepare": "node scripts/ensure-needle.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "clean": "rm -rf dist",
+    "clean": "node scripts/clean.mjs",
     "test": "node scripts/test-agent.mjs",
     "test:llm": "npm run build && node scripts/bench-battery.mjs",
     "needle:fetch": "node scripts/fetch-needle.mjs",
