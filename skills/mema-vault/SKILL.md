@@ -39,8 +39,16 @@ street + city). Card numbers display masked except last 4.
 - Shows `age` and warns when `>90d` (override with `--warn-days N`). `--json` for agents.
 
 ### 4. Delete a Credential
-Remove a credential permanently from the vault.
+Remove a credential from the active vault after creating an automatic snapshot.
 - **Usage**: `python3 scripts/vault.py delete <service>`
+
+### 4b. Automatic Backups and Restore
+- Every mutating command snapshots the database and matching salt before writing.
+- **List**: `python3 scripts/vault.py backup list`
+- **Prune**: `python3 scripts/vault.py backup prune`
+- **Restore**: `python3 scripts/vault.py restore <backup-directory> --confirm`
+- Configure `MEMA_VAULT_BACKUP_DIR` and `MEMA_VAULT_BACKUP_RETENTION` for an external backup directory and retention count.
+- Restore validates hashes, the 16-byte salt, and SQLite integrity, and preserves the current vault as `before-restore` first.
 
 ### 5. Verify Vault
 Check master key + salt without exposing secrets.
@@ -62,12 +70,13 @@ Single encrypted blob (Fernet with PBKDF2 + fixed export salt, `0600`). Same mas
 - **Interactive**: `python3 scripts/vault.py rotate-key`
 - **Agent Automation**: Set the old key in `MEMA_VAULT_MASTER_KEY` and the new key in `MEMA_VAULT_NEW_MASTER_KEY`.
 - **Stdin Automation**: Send the new key through stdin with `--new-key-stdin`.
-- Rotation creates a restricted database backup before updating any credential.
+- Rotation, import, deletion, storage, schema migration, and verifier initialization create restricted pre-change snapshots.
 
 ## Security Standards
 - **Encryption**: Authenticated Fernet encryption with PBKDF2HMAC-SHA256 (480,000 iterations).
 - **Masking**: Secrets are masked in standard logs/output unless explicitly requested.
 - **Isolation**: The Master Key should never be stored in plaintext on disk.
 - **Compatibility**: `MASTER_KEY` remains a deprecated fallback for existing installations.
-- **Storage**: Override runtime paths with `MEMA_VAULT_DB_PATH` and `MEMA_VAULT_SALT_PATH` when packaging or sharing the skill.
-- **Permissions**: Runtime database, salt, and rotation backups are restricted to owner-only (`0600`/`0700`).
+- **Storage**: Override runtime paths with `MEMA_VAULT_DB_PATH`, `MEMA_VAULT_SALT_PATH`, and `MEMA_VAULT_BACKUP_DIR` when packaging or sharing the skill.
+- **Retention**: `MEMA_VAULT_BACKUP_RETENTION` keeps the newest 30 snapshots by default; set it explicitly for predictable deployments.
+- **Permissions**: Runtime database, salt, backup snapshots, and manifests are restricted to owner-only (`0600`/`0700`).

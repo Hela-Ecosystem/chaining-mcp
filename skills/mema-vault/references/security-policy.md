@@ -9,8 +9,9 @@
 ## Storage
 - **Primary Backend**: Local SQLite database (`data/vault.db` by default).
 - **Persistence**: All encrypted credentials and metadata are stored locally in the workspace.
-- **Permissions**: Runtime database, salt, and rotation backups are restricted to the owner.
-- **Path Overrides**: `MEMA_VAULT_DB_PATH` and `MEMA_VAULT_SALT_PATH` can keep runtime data outside distributable skill files.
+- **Permissions**: Runtime database, salt, automatic backups, and manifests are restricted to the owner.
+- **Path Overrides**: `MEMA_VAULT_DB_PATH`, `MEMA_VAULT_SALT_PATH`, and `MEMA_VAULT_BACKUP_DIR` can keep runtime data outside distributable skill files.
+- **Retention**: `MEMA_VAULT_BACKUP_RETENTION` limits retained pre-change snapshots; the default is 30.
 - **No External Dependencies**: This version does not use Redis or cloud storage to ensure zero-network footprint.
 
 ## Access Control
@@ -26,7 +27,7 @@
 
 ## Data Exposure
 - Passwords are encrypted. Service names, usernames, and metadata remain plaintext in SQLite.
-- Do not share `.env`, `data/vault.db`, database backups, or runtime salt files.
+- Do not share `.env`, `data/vault.db`, database backups, backup manifests, or runtime salt files.
 - `.gitignore` excludes `.env`, `*.db`, `*.bin`, `*.enc`, and backups.
 - **Export**: `vault.py export` produces a single Fernet-encrypted blob (PBKDF2 480k + fixed export salt, `0600`). Same master key is required to `import`.
 - **Timestamps**: `updated_at`/`created_at` track credential age; `list` warns when `age > 90d` (override with `--warn-days`).

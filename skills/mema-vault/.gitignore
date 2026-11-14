@@ -43,6 +43,7 @@ data/*.db
 data/**/*.db
 data/*.enc
 data/**/*.enc
+data/backups/
 data/from-other/*.bin
 
 # Secrets

@@ -22,6 +22,8 @@ This is internal Hela tooling bundled in `chaining-mcp/skills/mema-vault`. Use i
   - [Run with secret as env var](#run-with-secret-as-env-var)
   - [Export / Import](#export--import-encrypted-portable)
   - [Delete a credential](#delete-a-credential)
+- [Automatic backups](#automatic-backups)
+- [Restore a backup](#restore-a-backup)
 - [Use cases](#use-cases)
 - [Rotate the master key](#rotate-the-master-key)
 - [Storage paths](#storage-paths)
@@ -171,7 +173,48 @@ python3 scripts/vault.py import --in /tmp/vault.enc --mode replace
 python3 scripts/vault.py delete github
 ```
 
-Deletion is permanent unless the database has been backed up.
+Deletion is recoverable through the automatic pre-change backups described below.
+
+### Automatic backups
+
+Every operation that can change vault state creates a snapshot before writing:
+
+- `set` / `store`
+- `delete`
+- encrypted `import`, including `--mode replace`
+- `rotate-key`
+- schema migration and first key-verifier initialization
+
+Each snapshot contains the matching `vault.db`, `salt.bin`, and a hash manifest
+in a timestamped directory. The newest 30 snapshots are retained by default.
+Configure the location and retention explicitly when the runtime data lives
+outside the skill directory:
+
+```bash
+export MEMA_VAULT_BACKUP_DIR="$HOME/.local/state/mema-vault/backups"
+export MEMA_VAULT_BACKUP_RETENTION=30
+python3 scripts/vault.py backup list
+python3 scripts/vault.py backup prune
+```
+
+Backups are owner-only (`0700` directory, `0600` files). Keep a separate
+encrypted export or filesystem copy as well; local retention does not protect
+against disk loss. Do not use an unguarded bidirectional sync against the
+database directory.
+
+### Restore a backup
+
+Restore only a complete snapshot directory. The command validates the manifest,
+salt, SQLite integrity, and both file hashes before replacing the active files:
+
+```bash
+python3 scripts/vault.py restore \
+  "$HOME/.local/state/mema-vault/backups/vault-20261114T120000.000000Z" \
+  --confirm
+```
+
+The current vault is backed up as `before-restore` first. Always restore the
+matching database and salt together; never copy only `vault.db`.
 
 ## Use cases
 
@@ -239,7 +282,10 @@ python3 scripts/vault.py rotate-key
 unset MEMA_VAULT_NEW_MASTER_KEY
 ```
 
-Rotation re-encrypts every password and creates `vault.db.backup-<timestamp>` beside the active database first. The backup remains encrypted with the old master key. Store that old key until the rotated vault has been verified, then handle the backup according to your retention policy.
+Rotation re-encrypts every password after creating an automatic snapshot in
+`MEMA_VAULT_BACKUP_DIR`. The snapshot remains encrypted with the old master
+key. Store that old key until the rotated vault has been verified, then let the
+retention policy or an explicit backup export handle the snapshot.
 
 ## Storage paths
 
@@ -251,17 +297,20 @@ Defaults:
 | --- | --- |
 | Credential database | `data/vault.db` |
 | Key-derivation salt | `data/salt.bin` |
+| Automatic backups | `data/backups/` |
 
 Override either path when runtime data should live outside the skill directory:
 
 ```bash
 export MEMA_VAULT_DB_PATH="$HOME/.local/state/mema-vault/vault.db"
 export MEMA_VAULT_SALT_PATH="$HOME/.local/state/mema-vault/salt.bin"
+export MEMA_VAULT_BACKUP_DIR="$HOME/.local/state/mema-vault/backups"
+export MEMA_VAULT_BACKUP_RETENTION=30
 ```
 
 Keep the database and salt together in backups. Losing the salt makes the stored passwords undecryptable, even with the correct master key.
 
-The CLI applies mode `0700` to runtime directories and `0600` to the database, salt, and rotation backups.
+The CLI applies mode `0700` to runtime and backup directories and `0600` to the database, salt, backup files, manifests, and exports.
 
 ## Security boundaries
 
@@ -277,7 +326,16 @@ The CLI applies mode `0700` to runtime directories and `0600` to the database, s
 
 ## Backup and recovery
 
-Back up both files, or use an encrypted export:
+Every mutating command first creates a retained snapshot containing both files.
+Use `backup list` to inspect snapshots and `backup prune` to apply the current
+retention setting:
+
+```bash
+python3 scripts/vault.py backup list
+python3 scripts/vault.py backup prune
+```
+
+Keep an external encrypted export as a second recovery boundary:
 
 ```text
 data/vault.db
@@ -286,9 +344,14 @@ data/salt.bin
 vault.enc  (from: python3 scripts/vault.py export --out vault.enc)
 ```
 
-Keep backups outside the repository with owner-only permissions. To restore, place the matching database and salt at the configured paths and use the master key that encrypted that database. For `vault.enc`, run `python3 scripts/vault.py import --in vault.enc --mode replace`.
-
-Before replacing a working vault, copy it to a separate directory. Do not overwrite the only known-good database during recovery.
+Keep backups outside the repository with owner-only permissions. To restore a
+snapshot, use `restore <directory> --confirm`; it validates the manifest and
+SQLite integrity, then preserves the current vault as `before-restore` before
+replacing the database and salt. For `vault.enc`, run
+`python3 scripts/vault.py import --in vault.enc --mode replace`; the import
+also creates a pre-change snapshot. Never restore only `vault.db`, and do not
+use raw bidirectional synchronization without a destination preflight and a
+recoverable backup.
 
 ## Tests
 

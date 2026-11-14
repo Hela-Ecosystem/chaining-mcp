@@ -12,6 +12,7 @@ import argparse
 import base64
 import difflib
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +36,7 @@ SALT_PATH = Path(os.environ.get("MEMA_VAULT_SALT_PATH", BASE_DIR / "data" / "sal
 EXPORT_SALT = b"mema-vault-export-v1"
 EXPORT_VERSION = 2
 WARN_DAYS = 90
+DEFAULT_BACKUP_RETENTION = 30
 VERIFIER_PLAINTEXT = b"mema-vault-verifier-v1"
 
 # Hardening limits
@@ -189,6 +192,215 @@ def connect():
     return connection
 
 
+def backup_dir():
+    configured = os.environ.get("MEMA_VAULT_BACKUP_DIR")
+    return Path(configured) if configured else DB_PATH.parent / "backups"
+
+
+def backup_retention():
+    raw = os.environ.get("MEMA_VAULT_BACKUP_RETENTION", str(DEFAULT_BACKUP_RETENTION))
+    try:
+        value = int(raw)
+    except ValueError:
+        raise VaultError("MEMA_VAULT_BACKUP_RETENTION must be an integer") from None
+    if value < 1 or value > 10_000:
+        raise VaultError("MEMA_VAULT_BACKUP_RETENTION must be between 1 and 10000")
+    return value
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fsync_file(path):
+    with path.open("rb") as stream:
+        os.fsync(stream.fileno())
+
+
+def _fsync_directory(path):
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _backup_entries():
+    root = backup_dir()
+    if not root.is_dir():
+        return []
+    return sorted(
+        (
+            item for item in root.iterdir()
+            if item.is_dir() and re.fullmatch(r"vault-[0-9TZ.:-]+", item.name)
+        ),
+        key=lambda item: item.name,
+        reverse=True,
+    )
+
+
+def prune_backups(protected=()):
+    entries = _backup_entries()
+    protected = {Path(item).resolve() for item in protected}
+    removed = 0
+    for stale in entries[backup_retention():]:
+        if stale.resolve() in protected:
+            continue
+        shutil.rmtree(stale)
+        removed += 1
+    return removed
+
+
+def create_backup(reason, protected=()):
+    """Snapshot the database and salt before a mutating operation."""
+    if not DB_PATH.exists():
+        return None
+    if not SALT_PATH.is_file():
+        raise VaultError(f"cannot back up vault: salt file not found: {SALT_PATH}")
+    if SALT_PATH.stat().st_size != 16:
+        raise VaultError(f"cannot back up vault: invalid salt file: {SALT_PATH}")
+
+    root = backup_dir()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    final_dir = root / f"vault-{timestamp}"
+    temporary_dir = Path(tempfile.mkdtemp(prefix=".vault-backup-", dir=root))
+    try:
+        snapshot_db = temporary_dir / "vault.db"
+        source = sqlite3.connect(str(DB_PATH))
+        target = sqlite3.connect(str(snapshot_db))
+        try:
+            source.backup(target)
+            target.commit()
+        finally:
+            target.close()
+            source.close()
+        snapshot_salt = temporary_dir / "salt.bin"
+        shutil.copyfile(SALT_PATH, snapshot_salt)
+        snapshot_db.chmod(0o600)
+        snapshot_salt.chmod(0o600)
+        manifest = {
+            "version": 1,
+            "created_at": _now_iso(),
+            "reason": validate_meta(reason),
+            "database": {"size": snapshot_db.stat().st_size, "sha256": _sha256(snapshot_db)},
+            "salt": {"size": snapshot_salt.stat().st_size, "sha256": _sha256(snapshot_salt)},
+        }
+        manifest_path = temporary_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        manifest_path.chmod(0o600)
+        for path in (snapshot_db, snapshot_salt, manifest_path):
+            _fsync_file(path)
+        os.replace(temporary_dir, final_dir)
+        _fsync_directory(root)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        shutil.rmtree(temporary_dir, ignore_errors=True)
+        raise VaultError(f"cannot create vault backup: {exc}") from exc
+    prune_backups(protected=protected)
+    return final_dir
+
+
+def _validate_backup(path):
+    path = Path(path)
+    database_path = path / "vault.db"
+    salt_path = path / "salt.bin"
+    manifest_path = path / "manifest.json"
+    if not path.is_dir() or not database_path.is_file() or not salt_path.is_file():
+        raise VaultError(f"invalid backup directory: {path}")
+    if salt_path.stat().st_size != 16:
+        raise VaultError(f"invalid backup salt: {salt_path}")
+    if not manifest_path.is_file():
+        raise VaultError(f"backup manifest missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise VaultError(f"invalid backup manifest: {exc}") from exc
+    if manifest.get("version") != 1:
+        raise VaultError(f"unsupported backup manifest: {manifest_path}")
+    database_meta = manifest.get("database", {})
+    salt_meta = manifest.get("salt", {})
+    if database_meta.get("size") != database_path.stat().st_size:
+        raise VaultError(f"backup database size mismatch: {path}")
+    if salt_meta.get("size") != salt_path.stat().st_size:
+        raise VaultError(f"backup salt size mismatch: {path}")
+    if database_meta.get("sha256") != _sha256(database_path):
+        raise VaultError(f"backup database hash mismatch: {path}")
+    if salt_meta.get("sha256") != _sha256(salt_path):
+        raise VaultError(f"backup salt hash mismatch: {path}")
+    connection = None
+    try:
+        connection = sqlite3.connect(str(database_path))
+        result = connection.execute("PRAGMA integrity_check").fetchone()
+        if not result or result[0] != "ok":
+            raise VaultError(f"backup database integrity check failed: {path}")
+    except sqlite3.Error as exc:
+        raise VaultError(f"invalid backup database: {exc}") from exc
+    finally:
+        if connection is not None:
+            connection.close()
+    return database_path, salt_path
+
+
+def restore_backup(path):
+    """Restore a validated backup after preserving the current vault."""
+    path = Path(path)
+    database_path, salt_path = _validate_backup(path)
+    current_backup = (
+        create_backup("before-restore", protected={path.resolve()})
+        if DB_PATH.exists()
+        else None
+    )
+    temporary_db = DB_PATH.with_name(f".{DB_PATH.name}.restore-{os.getpid()}")
+    temporary_salt = SALT_PATH.with_name(f".{SALT_PATH.name}.restore-{os.getpid()}")
+    try:
+        shutil.copyfile(database_path, temporary_db)
+        shutil.copyfile(salt_path, temporary_salt)
+        temporary_db.chmod(0o600)
+        temporary_salt.chmod(0o600)
+        _fsync_file(temporary_db)
+        _fsync_file(temporary_salt)
+        os.replace(temporary_db, DB_PATH)
+        os.replace(temporary_salt, SALT_PATH)
+        _fsync_directory(DB_PATH.parent)
+    except (OSError, sqlite3.Error) as exc:
+        for temporary in (temporary_db, temporary_salt):
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+        raise VaultError(f"restore failed: {exc}") from exc
+    print(f"Restored vault from {path}")
+    if current_backup:
+        print(f"Previous vault preserved at {current_backup}")
+
+
+def list_backups():
+    entries = _backup_entries()
+    if not entries:
+        print("No vault backups found.")
+        return
+    for entry in entries:
+        manifest = entry / "manifest.json"
+        reason = "unknown"
+        created_at = "unknown"
+        if manifest.is_file():
+            try:
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                reason = data.get("reason", reason)
+                created_at = data.get("created_at", created_at)
+            except (OSError, json.JSONDecodeError):
+                reason = "invalid-manifest"
+        print(f"- {entry}  created={created_at}  reason={reason}")
+
+
 @contextmanager
 def database():
     connection = connect()
@@ -199,7 +411,32 @@ def database():
         connection.close()
 
 
+def _schema_needs_migration():
+    if not DB_PATH.is_file():
+        return False
+    try:
+        with sqlite3.connect(str(DB_PATH)) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "credentials" not in tables or "vault_meta" not in tables:
+                return True
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(credentials)")
+            }
+            return not {
+                "updated_at", "created_at", "kind", "encrypted_fields"
+            }.issubset(columns)
+    except sqlite3.Error as exc:
+        raise VaultError(f"cannot inspect vault schema: {exc}") from exc
+
+
 def init_db():
+    if _schema_needs_migration():
+        create_backup("schema-migration")
     with database() as connection:
         try:
             connection.execute(
@@ -245,7 +482,7 @@ def _get_verifier_token(connection):
     return row[0] if row else None
 
 
-def ensure_verifier(connection, fernet):
+def ensure_verifier(connection, fernet, backup=True):
     """Create-or-check the key verifier.
 
     Fixes the empty-vault hole: previously a wrong master key was accepted
@@ -254,6 +491,8 @@ def ensure_verifier(connection, fernet):
     """
     token = _get_verifier_token(connection)
     if token is None:
+        if backup:
+            create_backup("initialize-verifier")
         try:
             token = fernet.encrypt(VERIFIER_PLAINTEXT).decode()
             connection.execute(
@@ -271,7 +510,7 @@ def ensure_verifier(connection, fernet):
 
 def validate_key(connection, fernet):
     try:
-        ensure_verifier(connection, fernet)
+        ensure_verifier(connection, fernet, backup=False)
     except InvalidToken:
         raise
     except VaultError:
@@ -585,6 +824,7 @@ def _store_record(service, kind, username, password, fields, meta):
         if fields
         else ""
     )
+    create_backup(f"store:{service}")
     now = _now_iso()
     with database() as connection:
         ensure_verifier(connection, fernet)
@@ -751,6 +991,7 @@ def list_credentials(json_output=False, warn_days=WARN_DAYS):
 def delete_credential(service):
     service = validate_service(service)
     fernet = get_fernet()
+    create_backup(f"delete:{service}")
     with database() as connection:
         validate_key(connection, fernet)
         try:
@@ -795,14 +1036,19 @@ def rotate_master_key(new_key):
             same = False
         if same:
             raise VaultError("new master key must differ from the current one")
-    backup_path = DB_PATH.with_name(
-        f"{DB_PATH.name}.backup-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-    )
-    try:
-        shutil.copy2(DB_PATH, backup_path)
-        backup_path.chmod(0o600)
-    except OSError as exc:
-        raise VaultError(f"cannot create backup: {exc}") from exc
+    backup_path = create_backup("rotate-key")
+
+    def restore_rotation_backup():
+        if not backup_path:
+            return
+        try:
+            shutil.copyfile(backup_path / "vault.db", DB_PATH)
+            shutil.copyfile(backup_path / "salt.bin", SALT_PATH)
+            DB_PATH.chmod(0o600)
+            SALT_PATH.chmod(0o600)
+        except OSError:
+            pass
+
     try:
         with database() as connection:
             rows = connection.execute(
@@ -838,18 +1084,10 @@ def rotate_master_key(new_key):
                 (new_fernet.encrypt(VERIFIER_PLAINTEXT).decode(),),
             )
     except InvalidToken:
-        try:
-            shutil.copy2(backup_path, DB_PATH)
-            DB_PATH.chmod(0o600)
-        except OSError:
-            pass
+        restore_rotation_backup()
         raise VaultError("invalid master key; rotation aborted, backup restored") from None
     except (sqlite3.Error, VaultError, OSError, ValueError) as exc:
-        try:
-            shutil.copy2(backup_path, DB_PATH)
-            DB_PATH.chmod(0o600)
-        except OSError:
-            pass
+        restore_rotation_backup()
         raise VaultError(f"rotation failed, backup restored: {exc}") from exc
     print(f"Rotated {len(rows)} credentials. Backup: {backup_path}")
 
@@ -988,8 +1226,9 @@ def import_vault(in_path, mode="merge"):
         raise VaultError("invalid import file format")
     if len(creds) > 10_000:
         raise VaultError("import file contains too many credentials (>10000)")
+    create_backup(f"import:{mode}")
     with database() as connection:
-        ensure_verifier(connection, local_fernet)
+        ensure_verifier(connection, local_fernet, backup=False)
         if mode == "replace":
             try:
                 connection.execute("DELETE FROM credentials")
@@ -1142,6 +1381,19 @@ def build_parser():
         "--mode", choices=["merge", "replace"], default="merge", help="merge or replace"
     )
 
+    backup_parser = subparsers.add_parser("backup", help="manage automatic vault backups")
+    backup_subparsers = backup_parser.add_subparsers(dest="backup_command", required=True)
+    backup_subparsers.add_parser("list", help="list retained backups")
+    backup_subparsers.add_parser("prune", help="remove backups beyond retention")
+
+    restore_parser = subparsers.add_parser(
+        "restore", help="restore a backup after preserving the current vault"
+    )
+    restore_parser.add_argument("backup", type=Path, help="backup directory to restore")
+    restore_parser.add_argument(
+        "--confirm", action="store_true", help="confirm replacing the current vault"
+    )
+
     return parser
 
 
@@ -1157,7 +1409,8 @@ def print_types():
 
 def main():
     args = build_parser().parse_args()
-    init_db()
+    if args.command not in {"backup", "restore", "types"}:
+        init_db()
     if args.command == "set":
         password = read_secret("Password: ", args.password_stdin)
         set_credential(args.service, args.username, password, args.meta)
@@ -1220,6 +1473,15 @@ def main():
         export_vault(args.out, args.format)
     elif args.command == "import":
         import_vault(args.input, args.mode)
+    elif args.command == "backup":
+        if args.backup_command == "list":
+            list_backups()
+        elif args.backup_command == "prune":
+            print(f"Pruned {prune_backups()} backup(s).")
+    elif args.command == "restore":
+        if not args.confirm:
+            raise VaultError("restore replaces the current vault; pass --confirm")
+        restore_backup(args.backup)
 
 
 if __name__ == "__main__":

@@ -80,12 +80,14 @@ class VaultTestCase(unittest.TestCase):
         vault.set_credential("one", "user", "secret-one")
         vault.set_credential("two", "user", "secret-two")
         old_fernet = vault.get_fernet()
+        before_rotation = set((self.db_path.parent / "backups").glob("vault-*"))
 
         vault.rotate_master_key("new-master-key")
 
-        backups = list(self.db_path.parent.glob("vault.db.backup-*"))
+        backups = set((self.db_path.parent / "backups").glob("vault-*")) - before_rotation
         self.assertEqual(len(backups), 1)
-        self.assertEqual(backups[0].stat().st_mode & 0o777, 0o600)
+        backup = next(iter(backups))
+        self.assertEqual((backup / "vault.db").stat().st_mode & 0o777, 0o600)
         os.environ["MEMA_VAULT_MASTER_KEY"] = "new-master-key"
         new_fernet = vault.get_fernet()
         with contextlib.closing(sqlite3.connect(self.db_path)) as connection:
@@ -101,6 +103,50 @@ class VaultTestCase(unittest.TestCase):
         )
         with self.assertRaises(InvalidToken):
             old_fernet.decrypt(tokens[0].encode())
+
+    def test_mutation_creates_hashed_backup_before_write(self):
+        vault.set_credential("first", "user", "secret")
+
+        backups = sorted((self.db_path.parent / "backups").glob("vault-*"))
+        self.assertGreaterEqual(len(backups), 1)
+        manifest = backups[-1] / "manifest.json"
+        self.assertTrue(manifest.is_file())
+        data = manifest.read_text(encoding="utf-8")
+        self.assertIn('"sha256"', data)
+        self.assertEqual((backups[-1] / "salt.bin").stat().st_mode & 0o777, 0o600)
+
+    def test_backup_retention_prunes_old_snapshots(self):
+        os.environ["MEMA_VAULT_BACKUP_RETENTION"] = "2"
+        for index in range(4):
+            vault.set_credential(f"service-{index}", "user", f"secret-{index}")
+
+        backups = list((self.db_path.parent / "backups").glob("vault-*"))
+        self.assertEqual(len(backups), 2)
+
+    def test_restore_preserves_current_vault_and_restores_snapshot(self):
+        vault.set_credential("first", "user", "secret")
+        vault.set_credential("second", "user", "other")
+        first_backup = sorted((self.db_path.parent / "backups").glob("vault-*"))[-1]
+
+        vault.restore_backup(first_backup)
+
+        with contextlib.closing(sqlite3.connect(self.db_path)) as connection:
+            services = connection.execute(
+                "SELECT service FROM credentials ORDER BY service"
+            ).fetchall()
+        self.assertEqual(services, [("first",)])
+        self.assertGreaterEqual(
+            len(list((self.db_path.parent / "backups").glob("vault-*"))), 3
+        )
+
+    def test_restore_rejects_tampered_backup(self):
+        vault.set_credential("service", "user", "secret")
+        backup = sorted((self.db_path.parent / "backups").glob("vault-*"))[-1]
+        database = backup / "vault.db"
+        database.write_bytes(database.read_bytes() + b"tampered")
+
+        with self.assertRaisesRegex(vault.VaultError, "(size|hash) mismatch"):
+            vault.restore_backup(backup)
 
     def test_runtime_files_are_owner_only(self):
         vault.set_credential("service", "user", "secret")
