@@ -51,10 +51,17 @@ export const HELA_CAPABILITIES: HelaCapability[] = [
   },
   {
     name: 'terminal.execute',
-    description: 'Run shell commands, sessions, transfers (R3 privileged)',
-    servers: ['terminal', 'nucleus', 'menager', 'ribosome'],
-    toolPatterns: ['execute_command', 'terminal_', 'transfer', 'pty', 'session_', 'opencode_'],
+    description: 'Run one-shot shell commands and transfers (R3 privileged)',
+    servers: ['terminal', 'nucleus'],
+    toolPatterns: ['execute_command', 'terminal_', 'transfer'],
     keywords: ['run', 'running', 'execute', 'shell', 'command', 'terminal', 'script', 'pytest', 'npm', 'build', 'deploy', 'ssh'],
+  },
+  {
+    name: 'terminal.session',
+    description: 'Manage interactive PTY sessions, remote terminals, and agent sessions (R3 privileged)',
+    servers: ['ribosome'],
+    toolPatterns: ['^(pty|session_|opencode_|agent_)'],
+    keywords: ['interactive', 'session', 'pty', 'repl', 'tmux', 'agent', 'opencode', 'remote session', 'drive session', 'python repl'],
   },
   {
     name: 'browser.observe',
@@ -123,7 +130,8 @@ export const CAPABILITY_TRANSITIONS: Record<string, string[]> = {
   'research.search': ['filesystem.write', 'terminal.execute', 'project.query'],
   'filesystem.read': ['filesystem.write', 'terminal.execute', 'ui.design'],
   'filesystem.write': ['terminal.execute', 'browser.observe', 'project.query'],
-  'terminal.execute': ['filesystem.read', 'terminal.execute', 'project.query', 'browser.observe'],
+  'terminal.execute': ['filesystem.read', 'terminal.execute', 'terminal.session', 'project.query', 'browser.observe'],
+  'terminal.session': ['terminal.execute', 'filesystem.read', 'project.query'],
   'browser.observe': ['browser.act', 'filesystem.write', 'project.query'],
   'browser.act': ['browser.observe', 'filesystem.write'],
   'ui.design': ['filesystem.write', 'browser.observe', 'ui.design'],
@@ -300,7 +308,7 @@ const EXPLICIT_TOOL_CAPABILITY: Record<string, string> = {
   terminal_cat: 'terminal.execute',
   execute_sql: 'project.query',
   query_data: 'project.query',
-  opencode_db: 'terminal.execute',
+  opencode_db: 'terminal.session',
 };
 
 export function capabilityOfTool(serverName: string, toolName: string): string {
@@ -403,7 +411,7 @@ export const BUILTIN_PROFILES: Record<string, string[]> = {
   ],
   // 2. Dev Workspace: full desktop development workstation (Mitosis + Genome + Membrane + Nucleus + Ribosome + Enzyme + Phenotype + Cytosol)
   'dev-workspace': [
-    'filesystem.read', 'filesystem.write', 'terminal.execute',
+    'filesystem.read', 'filesystem.write', 'terminal.execute', 'terminal.session',
     'browser.observe', 'browser.act', 'research.search',
     'project.query', 'project.mutate', 'ui.design'
   ],

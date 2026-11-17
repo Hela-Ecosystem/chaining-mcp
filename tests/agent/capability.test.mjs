@@ -22,9 +22,9 @@ const MIXED = [
 ];
 
 describe('capability graph (P1-C4)', () => {
-  test('registry covers the 8 required capability families', () => {
+  test('registry covers the required capability families', () => {
     const names = new Set(HELA_CAPABILITIES.map(c => c.name));
-    for (const c of ['filesystem.read', 'filesystem.write', 'terminal.execute', 'browser.observe',
+    for (const c of ['filesystem.read', 'filesystem.write', 'terminal.execute', 'terminal.session', 'browser.observe',
       'browser.act', 'research.search', 'project.query', 'android.inspect',
       'android.control', 'blender.model', 'ui.design']) {
       assert.ok(names.has(c), `missing ${c}`);
@@ -35,6 +35,10 @@ describe('capability graph (P1-C4)', () => {
     const cases = [
       ['read the config file and list the directory', 'filesystem.read'],
       ['run pytest and build the project', 'terminal.execute'],
+      ['run the test suite', 'terminal.execute'],
+      ['start an interactive python REPL', 'terminal.session'],
+      ['drive a tmux session', 'terminal.session'],
+      ['start an OpenCode agent session', 'terminal.session'],
       ['search google for latest AI news', 'research.search'],
       ['tap the submit button on the android phone screen', 'android.control'],
       ['render a cube in blender viewport', 'blender.model'],
@@ -56,6 +60,15 @@ describe('capability graph (P1-C4)', () => {
     assert.deepEqual(r.tools.map(t => t.name), ['execute_command']);
   });
 
+  test('one-shot and interactive terminal tasks scope to separate tool sets', () => {
+    const terminals = [
+      T('execute_command', 'nucleus'), T('transfer_file', 'nucleus'),
+      T('pty_spawn', 'ribosome'), T('session_write', 'ribosome'), T('agent_spawn', 'ribosome'),
+    ];
+    assert.deepEqual(scopeToolsForTask(terminals, 'run the test suite').tools.map(t => t.name), ['execute_command', 'transfer_file']);
+    assert.deepEqual(scopeToolsForTask(terminals, 'drive a tmux session').tools.map(t => t.name), ['pty_spawn', 'session_write', 'agent_spawn']);
+  });
+
   test('no signal -> full catalog fallback (never blind the planner)', () => {
     const r = scopeToolsForTask(MIXED, 'flibbertigibbet xyzzy quux');
     assert.equal(r.scoped, false);
@@ -64,6 +77,10 @@ describe('capability graph (P1-C4)', () => {
 
   test('capabilityOfTool maps concrete tools', () => {
     assert.equal(capabilityOfTool('terminal', 'execute_command'), 'terminal.execute');
+    assert.equal(capabilityOfTool('ribosome', 'pty_spawn'), 'terminal.session');
+    assert.equal(capabilityOfTool('ribosome', 'session_write'), 'terminal.session');
+    assert.equal(capabilityOfTool('ribosome', 'opencode_db'), 'terminal.session');
+    assert.equal(capabilityOfTool('ribosome', 'agent_spawn'), 'terminal.session');
     assert.equal(capabilityOfTool('researcher', 'google_search'), 'research.search');
     assert.equal(capabilityOfTool('filesystem', 'read_file'), 'filesystem.read');
   });
@@ -271,11 +288,13 @@ describe('dynamic capability resolver v2', () => {
     assert.ok(minCaps.includes("research.search"), "minimal must include research.search");
     assert.ok(!minCaps.includes("filesystem.read"), "minimal must not include filesystem.read");
     assert.ok(!minCaps.includes("terminal.execute"), "minimal must not include terminal.execute");
+    assert.ok(!minCaps.includes("terminal.session"), "minimal must not include terminal.session");
 
     // 2. dev-workspace: desktop workstation without 3D/mobile
     const devCaps = selectCapabilitiesForTask("tap android button and render blender mesh", { profile: "dev-workspace" });
     assert.ok(!devCaps.includes("android.control"), "dev-workspace must not include android.control");
     assert.ok(!devCaps.includes("blender.model"), "dev-workspace must not include blender.model");
+    assert.ok(selectCapabilitiesForTask('start an interactive python REPL', { profile: 'dev-workspace' }).includes('terminal.session'));
 
     // 3. headless-server: core 7 headless without browser/mobile/3D
     const headlessCaps = selectCapabilitiesForTask("scrape web page using browser and click button", { profile: "headless-server" });

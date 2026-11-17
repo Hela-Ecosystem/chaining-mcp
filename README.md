@@ -78,6 +78,8 @@ Escalation provider is **auto-detected** from the environment (`OPENROUTER_API_K
 - **Permanent System Grounding Cards in Git.** All system cards (`assets/needle/hela-system.txt` and `assets/needle/profiles/*.txt`) are checked into git, ensuring zero-configuration grounding immediately upon repository clone.
 - **Default capability-first two-tier scoping.** `scopeToolsForTask` scopes the full 200+ tool ecosystem to task-relevant organelle capabilities first, preventing context overflow in the 121M model while keeping decisions accurate and calibrated.
 
+- **Terminal capability boundary.** `terminal.execute` routes one-shot shell commands (`hela-nucleus` `execute_command`, terminal-prefixed tools, and transfers). `terminal.session` routes interactive PTY, remote session, and agent tools (`hela-ribosome` `pty`, `session_`, `opencode_`, and `agent_` tools).
+
   ![Blotcat filtering 342 tools through a mesh sieve into a tidy tray for Needle 3](assets/chaining-illustrations/05-two-tier-scoping.jpg)
 
 - **Needle 3 is the default router (Sept 2026).** 121M laddered model, 29MB file, ~78MB RAM. Measured here: Mobile Actions-style single calls at confidence 1.0, calibrated uncertainty on vague prompts (0.41 research → escalates under the 0.5 family floor), empty-list refusal instead of guesses. `NEEDLE_GENERATION=2` restores the legacy 45M engine. Caveats carry over: stochastic variance, vague commands refuse, descriptions drive recall more than model size.
