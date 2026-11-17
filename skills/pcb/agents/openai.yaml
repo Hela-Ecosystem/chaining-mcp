@@ -1,0 +1,6 @@
+interface:
+  display_name: "PCB Design"
+  short_description: "Design and verify manufacturable KiCad PCBs"
+  default_prompt: "Use $pcb to design, verify, and prepare this PCB for fabrication with KiCad."
+policy:
+  allow_implicit_invocation: true

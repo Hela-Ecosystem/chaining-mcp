@@ -2,6 +2,15 @@
 
 All notable changes to this project.
 
+## [3.0.6] - 2026-11-18
+
+### Added
+- Bundled the registry `pcb` skill for read-only discovery through Mitosis, including KiCad workflow references, independent verification scripts, JLCPCB preparation guidance, and preserved MIT licensing.
+- Documented the recommended PCB workflow across Mitosis, Genome, Membrane, Nucleus, Cytosol, and Enzyme.
+
+### Fixed
+- The skill bundle shipped with a second copy of itself nested at `skills/pcb/pcb` (154 duplicated files, 3.3 MB); the duplicate is removed so `get_skill` and discovery see one definition.
+
 ## [3.0.3] - 2026-11-13
 
 ### Fixed
