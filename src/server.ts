@@ -21,6 +21,7 @@ import { ResourceHandlers } from './resources/resource-handlers.js';
 import { RequestHandlers } from './handlers/request-handlers.js';
 import { HttpAdapter } from './transport/http-adapter.js';
 import { RunStore } from './agent/run-store.js';
+import { MCP_SERVER_VERSION } from './version.js';
 
 export class ChainingMCPServer {
   private server: Server;
@@ -90,7 +91,7 @@ export class ChainingMCPServer {
     const server = new Server(
       {
         name: 'chaining-mcp-server',
-    version: '3.0.4',
+        version: MCP_SERVER_VERSION,
       },
       {
         capabilities: {

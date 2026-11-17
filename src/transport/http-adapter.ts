@@ -2,6 +2,7 @@ import http from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { RunStore } from '../agent/run-store.js';
+import { MCP_SERVER_VERSION } from '../version.js';
 
 export interface HttpAdapterOptions {
   port?: number;
@@ -54,7 +55,7 @@ export class HttpAdapter {
             server: 'chaining-mcp',
             role: 'hela-mitosis',
             transport: 'stateless-http',
-            version: '3.0.4',
+            version: MCP_SERVER_VERSION,
             protocolVersion: '2026-07-28',
           }));
           return;
@@ -69,7 +70,7 @@ export class HttpAdapter {
           });
           res.end(JSON.stringify({
             name: 'chaining-mcp-server',
-            version: '3.0.4',
+            version: MCP_SERVER_VERSION,
             protocolVersion: '2026-07-28',
             role: 'hela-mitosis',
             capabilities: {
@@ -218,7 +219,7 @@ export class HttpAdapter {
                 id,
                 result: {
                   name: 'chaining-mcp-server',
-                  version: '3.0.4',
+                  version: MCP_SERVER_VERSION,
                   protocolVersion: '2026-07-28',
                   role: 'hela-mitosis',
                   capabilities: {

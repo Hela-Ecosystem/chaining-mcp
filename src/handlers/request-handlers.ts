@@ -10,6 +10,7 @@ import { runAgentWorkflow } from '../agent/workflow.js';
 import { isAgentEnabled, escalationProviderAvailable, detectedEscalationProvider } from '../agent/diagnostics.js';
 import { buildGuidance, buildSkillGuidance } from '../agent/guidance.js';
 import { sharedSkills } from '../skills/skill-discovery.js';
+import { MCP_SERVER_VERSION } from '../version.js';
 
 export class RequestHandlers {
   constructor(
@@ -492,7 +493,7 @@ export class RequestHandlers {
           params: {
             protocolVersion: '2024-11-05',
             capabilities: {},
-            clientInfo: { name: 'chaining-mcp-server', version: '3.0.4' }
+            clientInfo: { name: 'chaining-mcp-server', version: MCP_SERVER_VERSION }
           }
         };
 
