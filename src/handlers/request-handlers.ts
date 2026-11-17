@@ -492,7 +492,7 @@ export class RequestHandlers {
           params: {
             protocolVersion: '2024-11-05',
             capabilities: {},
-            clientInfo: { name: 'chaining-mcp-server', version: '3.0.3' }
+            clientInfo: { name: 'chaining-mcp-server', version: '3.0.4' }
           }
         };
 
