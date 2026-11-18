@@ -5,7 +5,7 @@ export const MCPServerInfoSchema = z.object({
   name: z.string(),
   command: z.string(),
   args: z.array(z.string()),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   description: z.string().optional(),
   version: z.string().optional(),
   capabilities: z.object({
@@ -19,7 +19,7 @@ export const MCPServerInfoSchema = z.object({
 export const ToolInfoSchema = z.object({
   name: z.string(),
   description: z.string(),
-  inputSchema: z.record(z.any()),
+  inputSchema: z.record(z.string(), z.any()),
   serverName: z.string(),
   category: z.string().optional(),
   dependencies: z.array(z.string()).optional(),
@@ -53,7 +53,7 @@ export const OptimizationCriteriaSchema = z.object({
 // Sequential Thinking Integration Schema
 export const SequentialThinkingRequestSchema = z.object({
   problem: z.string(),
-  context: z.record(z.any()).optional(),
+  context: z.record(z.string(), z.any()).optional(),
   maxThoughts: z.number().min(1).max(20).default(10),
   optimizationCriteria: OptimizationCriteriaSchema.optional(),
 });
@@ -192,9 +192,9 @@ export const WorkflowStepSchema = z.object({
   id: z.string().describe('Unique identifier for this step'),
   serverName: z.string().describe('Name of the MCP server to execute on'),
   toolName: z.string().describe('Name of the tool to execute'),
-  parameters: z.record(z.any()).describe('Parameters to pass to the tool'),
+  parameters: z.record(z.string(), z.any()).describe('Parameters to pass to the tool'),
   dependsOn: z.array(z.string()).optional().describe('IDs of steps that must complete before this step'),
-  outputMapping: z.record(z.string()).optional().describe('Map outputs from this step to input parameters for dependent steps'),
+  outputMapping: z.record(z.string(), z.string()).optional().describe('Map outputs from this step to input parameters for dependent steps'),
   retryOnFailure: z.boolean().optional().describe('Whether to retry this step on failure'),
   maxRetries: z.number().optional().describe('Maximum number of retries'),
   idempotent: z.boolean().optional().describe('P0-B3: true = safe to re-run after an unknown outcome; false/absent = resume must NOT blindly replay'),
@@ -207,7 +207,7 @@ export const WorkflowOrchestratorSchema = z.object({
   steps: z.array(WorkflowStepSchema).describe('Array of workflow steps to execute'),
   failFast: z.boolean().optional().describe('Whether to stop execution on first failure'),
   timeout: z.number().optional().describe('Maximum execution time in milliseconds'),
-  variables: z.record(z.any()).optional().describe('Global variables available to all steps'),
+  variables: z.record(z.string(), z.any()).optional().describe('Global variables available to all steps'),
 });
 
 // Time Schemas
@@ -268,7 +268,7 @@ export const ValidateToolChainSchema = z.object({
   toolChain: z.array(z.object({
     serverName: z.string().describe('Name of the MCP server'),
     toolName: z.string().describe('Name of the tool'),
-    parameters: z.record(z.any()).optional().describe('Parameters for the tool'),
+    parameters: z.record(z.string(), z.any()).optional().describe('Parameters for the tool'),
     dependsOn: z.array(z.string()).optional().describe('Tool names this tool depends on'),
   })).describe('The tool chain to validate'),
   checkCircularDependencies: z.boolean().default(true).describe('Whether to check for circular dependencies'),
@@ -280,7 +280,7 @@ export const AnalyzeToolChainPerformanceSchema = z.object({
   toolChain: z.array(z.object({
     serverName: z.string().describe('Name of the MCP server'),
     toolName: z.string().describe('Name of the tool'),
-    parameters: z.record(z.any()).optional().describe('Parameters for the tool'),
+    parameters: z.record(z.string(), z.any()).optional().describe('Parameters for the tool'),
     dependsOn: z.array(z.string()).optional().describe('Tool names this tool depends on'),
   })).describe('The tool chain to analyze'),
   includeExecutionMetrics: z.boolean().default(true).describe('Whether to include execution time estimates'),

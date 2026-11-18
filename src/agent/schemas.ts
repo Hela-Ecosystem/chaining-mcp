@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const AgentDecisionSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('call_tool'), tool: z.string(), args: z.record(z.any()), reasoning: z.string().optional(), confidence: z.number().min(0).max(1).optional() }),
+  z.object({ action: z.literal('call_tool'), tool: z.string(), args: z.record(z.string(), z.any()), reasoning: z.string().optional(), confidence: z.number().min(0).max(1).optional() }),
   z.object({ action: z.literal('complete'), result: z.any(), reasoning: z.string().optional() }),
   z.object({ action: z.literal('revise'), note: z.string(), patch: z.any().optional() }),
   z.object({ action: z.literal('escalate'), reason: z.string(), context: z.any().optional() }),

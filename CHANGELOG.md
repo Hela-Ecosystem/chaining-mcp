@@ -2,6 +2,11 @@
 
 All notable changes to this project.
 
+## [3.0.8] - 2026-11-19
+
+### Changed
+- Upgrade Zod to 4.6 and glob to 14, preserving schema and discovery behavior.
+
 ## [3.0.6] - 2026-11-18
 
 ### Added

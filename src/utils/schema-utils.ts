@@ -2,6 +2,28 @@ import { z } from 'zod';
 import { AnalyzeWithSequentialThinkingSchema } from '../types.js';
 
 /**
+ * Zod 4 moved check metadata under `_zod.def` and renamed the kinds, so read it
+ * through one adapter instead of poking at internals in three places.
+ */
+type ZodCheckView = { kind: string; value?: number; minimum?: number; maximum?: number; format?: string; inclusive?: boolean };
+
+function readChecks(schema: { _zod?: { def?: { checks?: unknown[] } }; _def?: { checks?: unknown[] } }): ZodCheckView[] {
+  const checks = (schema._zod?.def?.checks ?? schema._def?.checks ?? []) as Array<Record<string, any>>;
+  return checks.map((check) => {
+    const def = (check as any)._zod?.def ?? check;
+    return {
+      kind: String(def.check ?? def.kind ?? ''),
+      value: def.value,
+      minimum: def.minimum,
+      maximum: def.maximum,
+      format: def.format,
+      inclusive: def.inclusive,
+    } as ZodCheckView;
+  });
+}
+
+
+/**
  * Intelligent schema analyzer for dynamic JSON Schema generation
  */
 class SchemaAnalyzer {
@@ -112,18 +134,11 @@ class SchemaAnalyzer {
     };
 
     // Add intelligent constraints
-    if (zodSchema._def.checks) {
-      for (const check of zodSchema._def.checks) {
-        if (check.kind === 'min') {
-          schema.minLength = check.value;
-        } else if (check.kind === 'max') {
-          schema.maxLength = check.value;
-        } else if (check.kind === 'email') {
-          schema.format = 'email';
-        } else if (check.kind === 'url') {
-          schema.format = 'uri';
-        }
-      }
+    for (const check of readChecks(zodSchema)) {
+      if (check.kind === 'min_length') schema.minLength = check.minimum;
+      else if (check.kind === 'max_length') schema.maxLength = check.maximum;
+      else if (check.kind === 'string_format' && check.format === 'email') schema.format = 'email';
+      else if (check.kind === 'string_format' && (check.format === 'url' || check.format === 'uri')) schema.format = 'uri';
     }
 
     return schema;
@@ -138,15 +153,15 @@ class SchemaAnalyzer {
       description: this.generateNumberDescription(zodSchema),
     };
 
-    if (zodSchema._def.checks) {
-      for (const check of zodSchema._def.checks) {
-        if (check.kind === 'min') {
-          schema.minimum = check.value;
-        } else if (check.kind === 'max') {
-          schema.maximum = check.value;
-        } else if (check.kind === 'int') {
-          schema.type = 'integer';
-        }
+    for (const check of readChecks(zodSchema)) {
+      if (check.kind === 'greater_than') {
+        if (check.inclusive === false) schema.exclusiveMinimum = check.value;
+        else schema.minimum = check.value;
+      } else if (check.kind === 'less_than') {
+        if (check.inclusive === false) schema.exclusiveMaximum = check.value;
+        else schema.maximum = check.value;
+      } else if (check.kind === 'number_format' && check.format === 'safeint') {
+        schema.type = 'integer';
       }
     }
 
@@ -182,12 +197,10 @@ class SchemaAnalyzer {
    * Generate intelligent string description
    */
   private generateStringDescription(zodSchema: z.ZodString): string {
-    if (zodSchema._def.checks) {
-      for (const check of zodSchema._def.checks) {
-        if (check.kind === 'email') return 'Email address';
-        if (check.kind === 'url') return 'URL or URI';
-        if (check.kind === 'uuid') return 'UUID identifier';
-      }
+    for (const check of readChecks(zodSchema)) {
+      if (check.kind === 'string_format' && check.format === 'email') return 'Email address';
+      if (check.kind === 'string_format' && (check.format === 'url' || check.format === 'uri')) return 'URL or URI';
+      if (check.kind === 'string_format' && check.format === 'uuid') return 'UUID identifier';
     }
     return 'Text string';
   }
@@ -196,10 +209,8 @@ class SchemaAnalyzer {
    * Generate intelligent number description
    */
   private generateNumberDescription(zodSchema: z.ZodNumber): string {
-    if (zodSchema._def.checks) {
-      for (const check of zodSchema._def.checks) {
-        if (check.kind === 'int') return 'Integer number';
-      }
+    for (const check of readChecks(zodSchema)) {
+      if (check.kind === 'number_format' && check.format === 'safeint') return 'Integer number';
     }
     return 'Numeric value';
   }
