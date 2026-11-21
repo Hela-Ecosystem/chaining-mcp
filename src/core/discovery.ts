@@ -23,6 +23,82 @@ export class MCPServerDiscovery {
   }
 
   /**
+   * Locate the runtime's generated tool catalog.
+   *
+   * Under `hela-runtime` the ten cells sit behind one endpoint and never appear in
+   * client configs, so config-based discovery sees none of them. The catalog is
+   * written and revision-validated by the ecosystem build, and knows every cell's
+   * tools (chaining-mcp#21).
+   */
+  private async helaCatalogPath(): Promise<string | null> {
+    const candidates: string[] = [];
+    const root = process.env.HELA_ECOSYSTEM_ROOT;
+    if (root) candidates.push(join(root, 'config', 'tool-catalog.json'));
+
+    const installations = join(homedir(), '.local', 'share', 'hela', 'installations');
+    try {
+      for (const entry of await readdir(installations, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          candidates.push(join(installations, entry.name, 'hela-mcp-ecosystem', 'config', 'tool-catalog.json'));
+        }
+      }
+    } catch { /* no managed installations on this host */ }
+
+    for (const candidate of candidates) {
+      try {
+        await access(candidate);
+        return candidate;
+      } catch { /* try the next candidate */ }
+    }
+    return null;
+  }
+
+  /** Cells and tools from the runtime catalog, empty when it is unavailable. */
+  private async loadHelaCatalog(): Promise<{ servers: MCPServerInfo[]; tools: ToolInfo[] }> {
+    const catalogPath = await this.helaCatalogPath();
+    if (!catalogPath) return { servers: [], tools: [] };
+
+    try {
+      const parsed = JSON.parse(await readFile(catalogPath, 'utf-8'));
+      const cells: Record<string, any> = parsed?.cells ?? {};
+      const servers: MCPServerInfo[] = [];
+      const tools: ToolInfo[] = [];
+
+      for (const [id, cell] of Object.entries(cells)) {
+        const variants: any[] = Array.isArray(cell?.variants) ? cell.variants : [];
+        const byName = new Map<string, any>();
+        for (const variant of variants) {
+          for (const tool of variant?.tools ?? []) {
+            if (tool?.name) byName.set(tool.name, tool);
+          }
+        }
+        servers.push(MCPServerInfoSchema.parse({
+          name: id,
+          command: 'hela-runtime',
+          args: [id],
+          env: {},
+          description: `${id} (runtime catalog)`,
+          version: typeof cell?.version === 'string' ? cell.version : '0.0.0',
+          capabilities: { tools: true, resources: false, prompts: false },
+        }));
+        for (const tool of byName.values()) {
+          tools.push({
+            name: tool.name,
+            description: typeof tool.description === 'string' ? tool.description : '',
+            inputSchema: tool.inputSchema ?? { type: 'object', properties: {} },
+            serverName: id,
+            category: 'hela-runtime',
+          });
+        }
+      }
+
+      return { servers, tools };
+    } catch {
+      return { servers: [], tools: [] };
+    }
+  }
+
+  /**
    * Discover MCP servers from common configuration locations
    */
   async discoverServers(forceRefresh = false): Promise<MCPServerInfo[]> {
@@ -62,6 +138,17 @@ export class MCPServerDiscovery {
     // Add essential servers from configuration
     const essentialServers = this.getEssentialServers();
     discoveredServers.push(...essentialServers);
+
+    // The runtime catalog covers cells that client configs cannot see.
+    const catalog = await this.loadHelaCatalog();
+    for (const server of catalog.servers) {
+      if (!discoveredServers.some((candidate) => candidate.name === server.name)) {
+        discoveredServers.push(server);
+      }
+    }
+    for (const tool of catalog.tools) {
+      if (!this.tools.has(tool.name)) this.tools.set(tool.name, tool);
+    }
 
     // Store discovered servers
     for (const server of discoveredServers) {

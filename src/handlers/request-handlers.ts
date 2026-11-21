@@ -1,3 +1,4 @@
+import { checkToolAvailability } from '../core/tool-availability.js';
 import { spawn } from 'child_process';
 import { MCPServerDiscovery } from '../core/discovery.js';
 import { SmartRouteOptimizer } from '../core/optimizer.js';
@@ -600,8 +601,9 @@ export class RequestHandlers {
 
     // Check tool availability if requested
     if (options.checkToolAvailability !== false) {
-      const availabilityErrors = this.checkToolAvailability(toolChain, availableTools);
-      errors.push(...availabilityErrors);
+      const availability = checkToolAvailability(toolChain, availableTools);
+      errors.push(...availability.errors);
+      warnings.push(...availability.warnings);
     }
 
     // Check parameter compatibility if requested
@@ -666,19 +668,6 @@ export class RequestHandlers {
     Object.keys(dependencyGraph).forEach(nodeId => {
       if (!visited.has(nodeId)) {
         hasCycle(nodeId);
-      }
-    });
-
-    return errors;
-  }
-
-  private checkToolAvailability(toolChain: any[], availableTools: any[]): string[] {
-    const errors: string[] = [];
-    const availableToolNames = new Set(availableTools.map(tool => tool.name));
-
-    toolChain.forEach(step => {
-      if (!availableToolNames.has(step.toolName)) {
-        errors.push(`Tool '${step.toolName}' is not available in server '${step.serverName}'`);
       }
     });
 

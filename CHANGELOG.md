@@ -1,4 +1,12 @@
 # Changelog
+## [3.0.9] - 2026-11-22
+
+### Fixed
+- Peer discovery is runtime-aware. Under `hela-runtime` the ten cells sit behind one endpoint and never appear in client configs, so discovery found nothing and `validate_tool_chain` reported every real tool as unavailable — `read_file` on `hela-membrane` included. The runtime's generated `config/tool-catalog.json` is now read as an additional source (via `HELA_ECOSYSTEM_ROOT`, then any managed installation), contributing each cell and its tools. Verified against the installed catalog: 10 cells, 299 tools, `read_file` resolves. `list_mcp_servers` and the analysis tools built on discovery see the same fix.
+
+### Changed
+- Tool availability now has three outcomes instead of two: a discovered server with a missing tool is an error; a server that was not discovered, or a run with no catalog at all, is a warning ("could not be verified"). Reporting the second as the first made the validator reject correct plans, which is the dangerous direction. Short server names (`membrane`) also resolve against `hela-` prefixed cells. (`chaining-mcp#21`)
+
 
 All notable changes to this project.
 
