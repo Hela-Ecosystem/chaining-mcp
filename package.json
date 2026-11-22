@@ -1,6 +1,6 @@
 {
   "name": "chaining-mcp",
-  "version": "3.0.9",
+  "version": "3.1.0",
   "description": "Comprehensive MCP server with intelligent tool chaining, route optimization, persistent memory, sequential thinking, and time management",
   "author": "Azzar Budiyanto",
   "license": "GPL-3.0-or-later",

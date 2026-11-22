@@ -1,4 +1,15 @@
 # Changelog
+## [3.1.0] - 2026-11-22
+
+### Changed
+- `workflow_orchestrator` dispatches to named cells. With `HELA_RUNTIME_URL` set, a step for a sibling cell runs through `hela.pipe` over streamable HTTP; local tools still run in-process. Without a runtime, a sibling step fails with a clear reason instead of silently reporting completion. Failed steps read `{ok:false}`/`{success:false}`/`isError` as failures, `failFast` stops dependent work, and retries run per step. (`chaining-mcp#22`)
+- Planner tools name a tool or say why they cannot. Catalogs are scoped and ranked before Needle sees them (376 -> 8), escalation must return exact tool names, and all five planners report `source`, `degraded`, `plannerError` and `omittedSteps` instead of claiming "Validated"/"grounded". Any `ok:false` result is now an MCP error. (`chaining-mcp#23`)
+- The analysis tools stop inventing numbers. `get_tool_chain_analysis` recommends only registry tools (no confidence score), `analyze_tool_chain_performance` shares `validate_tool_chain` diagnostics and computes parallelization from real dependencies, and `analyze_tools` uses the cell as category with `null` for unknown complexity. (`chaining-mcp#25`)
+
+### Fixed
+- `agent_run` records `success:false` as a failure, refuses a `complete` that follows no successful call, scopes standalone clock requests to `get_current_time`, and no longer treats a duplicate call as saturation. (`chaining-mcp#24`)
+- Skill frontmatter parses quotes, block scalars (`|`, `>`, `>-`), chomping indicators and inline comments; a malformed SKILL.md is reported with its file instead of "unknown skill"; `maxChars` bounds the serialized response (file list first). (`chaining-mcp#26`)
+
 ## [3.0.9] - 2026-11-22
 
 ### Fixed
