@@ -624,6 +624,20 @@ export function scopeToolsForTask<T extends ToolDecl>(
   return { tools: orderCanonicalTools(keep, task, true), scoped: true, capabilities: caps };
 }
 
+/** Rank tools within a capability shortlist without relying on discovery order. */
+export function rankToolsForTask<T extends ToolDecl>(tools: T[], task: string): T[] {
+  const tokenize = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words = [...new Set(tokenize(task).filter(word => !STOPWORDS.has(word)))];
+  const explicitNames = new Set(task.toLowerCase().match(/[\w-]+/g));
+  return tools.map(tool => {
+    const name = tokenize(tool.name);
+    const description = tokenize(tool.description ?? '');
+    const score = words.reduce((sum, word) => sum + (name.some(term => stemMatches(word, term)) ? 3
+      : description.some(term => stemMatches(word, term)) ? 1 : 0), 0);
+    return { tool, score: score + (explicitNames.has(tool.name.toLowerCase()) ? 10 : 0) };
+  }).sort((a, b) => b.score - a.score).map(({ tool }) => tool);
+}
+
 /** Rendered prompt-list size (same `- name: desc` render as the loop). */
 export function promptContextSize(tools: ToolDecl[]): number {
   return tools.map(t => `- ${t.name}${t.description ? ': ' + t.description.slice(0, 80) : ''}`).join('\n').length;

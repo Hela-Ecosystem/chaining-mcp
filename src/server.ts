@@ -127,7 +127,11 @@ export class ChainingMCPServer {
         await this.ensureInitialized();
 
         const result = await this.requestHandlers.handleToolCall(name, args, signal);
+        // A handler that reports ok:false is a failure, even though it returned a
+        // structured body instead of throwing; the MCP envelope must say so.
+        const failed = typeof result === 'object' && result !== null && (result as { ok?: unknown }).ok === false;
         return {
+          ...(failed ? { isError: true } : {}),
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
       } catch (error) {

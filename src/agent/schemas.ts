@@ -11,7 +11,7 @@ export type AgentDecision = z.infer<typeof AgentDecisionSchema>;
 export const AgentPlanStepSchema = z.object({
   step: z.number(),
   task: z.string(),
-  tool: z.string().optional(),
+  tool: z.string().min(1),
   recommendedCategory: z.string().optional(),
   dependsOn: z.array(z.number()).default([]),
 });

@@ -138,12 +138,12 @@ export class RequestHandlers {
             const { planTask } = await import('../agent/agent.js');
             const plan = await planTask(
               args.task, summary, undefined, undefined,
-              tools.map(t => ({ name: t.name, description: t.description, schema: (t.inputSchema as any)?.properties ? t.inputSchema : undefined })),
+              this.agentToolDecls(),
               this.resolveGuidance(String(args.task || '')),
             );
             return {
               ok: true,
-              source: 'needle',
+              ...this.planFields(plan),
               subtasks: plan.steps.map(s => ({
                 step: s.step,
                 task: s.task,
@@ -153,7 +153,7 @@ export class RequestHandlers {
               })),
             };
           } catch (e) {
-            return { ok: false, source: 'needle', error: e instanceof Error ? e.message : String(e) };
+            return this.plannerFailure(e);
           }
         }
         const guard = needLLM();
@@ -172,24 +172,25 @@ export class RequestHandlers {
             this.agentToolDecls(),
             this.resolveGuidance(String(args.task || '')),
           );
-          const byName = new Map(this.discovery.getTools().map(t => [t.name, t]));
-          const planTools = plan.steps.map(s => byName.get(s.tool || '')).filter((t): t is NonNullable<typeof t> => Boolean(t));
+          const resolved = this.resolvePlanTools(plan.steps);
+          const planTools = [...resolved.values()];
+          const unresolved = plan.steps.length - planTools.length;
           return {
             ok: true,
-            source: 'needle',
+            ...this.planFields(plan),
             routes: [{
-              id: `needle_route_${Date.now()}`,
-              name: 'Needle agent route',
-              description: `Validated ${plan.steps.length}-step chain for: ${String(args.task || '').slice(0, 120)}`,
+              id: `plan_route_${Date.now()}`,
+              name: `${plan.source} plan`,
+              description: `${plan.steps.length}-step chain for: ${String(args.task || '').slice(0, 120)}${unresolved ? ` (${unresolved} step(s) without a registry tool)` : ''}`,
               tools: planTools,
               estimatedDuration: planTools.reduce((sum, t: any) => sum + (t.estimatedDuration || 500), 0),
               complexity: Math.round(plan.steps.length * 10) / 10,
               confidence: plan.steps.length ? Math.round((planTools.length / plan.steps.length) * 100) / 100 : 0,
-              reasoning: `Needle-selected chain; ${planTools.length}/${plan.steps.length} steps resolved against the registry`,
+              reasoning: `${plan.source} selected ${plan.steps.length} step(s); ${planTools.length} resolved against the registry`,
             }],
           };
         } catch (e) {
-          return { ok: false, source: 'needle', error: e instanceof Error ? e.message : String(e) };
+          return this.plannerFailure(e);
         }
       }
 
@@ -205,13 +206,56 @@ export class RequestHandlers {
     }
   }
 
-  /** Tool declarations (with exact arg schemas) for Needle context. */
-  private agentToolDecls(): Array<{ name: string; description?: string; schema?: unknown }> {
+  /** Tool declarations (with exact arg schemas and cell) for Needle context. */
+  private agentToolDecls(): Array<{ name: string; description?: string; schema?: unknown; server?: string }> {
     return this.discovery.getTools().map(t => ({
       name: t.name,
       description: t.description,
       schema: (t.inputSchema as any)?.properties ? t.inputSchema : undefined,
+      server: t.serverName ?? (t as { server?: string }).server,
     }));
+  }
+
+  /**
+   * Planned steps name a tool by its cell-prefixed address (`hela_membrane_read_file`).
+   * Resolve that back to the discovered entry, accepting the bare name too.
+   */
+  private resolvePlanTools(steps: Array<{ tool: string }>): Map<string, any> {
+    const byName = new Map<string, any>();
+    for (const tool of this.discovery.getTools()) {
+      byName.set(tool.name, tool);
+      const server = tool.serverName ?? (tool as { server?: string }).server;
+      if (server) byName.set(`${String(server).replace(/-/g, '_')}_${tool.name}`, tool);
+    }
+    const resolved = new Map<string, any>();
+    for (const step of steps) {
+      const tool = byName.get(step.tool);
+      if (tool) resolved.set(step.tool, tool);
+    }
+    return resolved;
+  }
+
+  /** Planner provenance: a fallback or a shortfall makes the result degraded, never silently equal. */
+  private planFields(plan: { source: string; plannerError?: string; omittedSteps?: number }): Record<string, unknown> {
+    return {
+      source: plan.source,
+      degraded: plan.source !== 'needle' || Boolean(plan.plannerError) || Boolean(plan.omittedSteps),
+      ...(plan.plannerError ? { plannerError: plan.plannerError } : {}),
+      ...(plan.omittedSteps ? { omittedSteps: plan.omittedSteps } : {}),
+    };
+  }
+
+  private plannerFailure(error: unknown): Record<string, unknown> {
+    const plannerError = error && typeof error === 'object' && 'plannerError' in error
+      && typeof (error as { plannerError?: unknown }).plannerError === 'string'
+      ? (error as { plannerError: string }).plannerError
+      : undefined;
+    return {
+      ok: false,
+      source: 'planner',
+      error: error instanceof Error ? error.message : String(error),
+      ...(plannerError ? { plannerError } : {}),
+    };
   }
 
   /** Task-relevant prebuilt-prompt + skill guidance for agent context (local, capped). */
@@ -274,21 +318,22 @@ export class RequestHandlers {
             this.agentToolDecls(),
             this.resolveGuidance(String(args.task || '')),
           );
-          const byName = new Map(this.discovery.getTools().map(t => [t.name, t]));
-          const planTools = plan.steps.map(s => byName.get(s.tool || '')).filter((t): t is NonNullable<typeof t> => Boolean(t));
+          const resolved = this.resolvePlanTools(plan.steps);
+          const planTools = [...resolved.values()];
           return {
-            source: 'needle',
+            ok: true,
+            ...this.planFields(plan),
             routes: [{
-              tools: planTools.map(t => t.name),
+              tools: [...resolved.keys()],
               estimatedDuration: planTools.reduce((sum, t: any) => sum + (t.estimatedDuration || 500), 0),
               complexity: Math.round(plan.steps.length * 10) / 10,
               confidence: plan.steps.length ? Math.round((planTools.length / plan.steps.length) * 100) / 100 : 0,
-              reasoning: `Needle-selected chain of ${plan.steps.length} step(s) grounded in registry tools`,
+              reasoning: `${plan.source} selected ${plan.steps.length} step(s); ${planTools.length} resolved against the registry`,
             }],
             totalRoutes: 1,
           };
         } catch (e) {
-          return { ok: false, source: 'needle', error: e instanceof Error ? e.message : String(e) };
+          return this.plannerFailure(e);
         }
       }
 
@@ -299,42 +344,46 @@ export class RequestHandlers {
         // no heuristic fallback here; planTask throws honestly when neither
         // Needle nor OpenRouter can plan.
         const { planTask } = await import('../agent/agent.js');
-        const plan = await planTask(
-          String(args.problem || ''), '',
-          undefined, undefined,
-          availableTools.map(t => ({ name: t.name, description: t.description, schema: (t.inputSchema as any)?.properties ? t.inputSchema : undefined })),
-          this.resolveGuidance(String(args.problem || '')),
-        );
-        const byName = new Map(availableTools.map(t => [t.name, t]));
-        const planTools = plan.steps.map(s => byName.get(s.tool || '')).filter((t): t is NonNullable<typeof t> => Boolean(t));
-        const knownShare = plan.steps.length ? planTools.length / plan.steps.length : 0;
-        return {
-          source: 'needle-agent',
-          thoughts: plan.steps.map(s => ({
-            number: s.step,
-            content: `${s.tool}: ${s.task}`,
-            type: 'planning',
-          })),
-          analysis: {
-            problemComplexity: plan.steps.length > 4 ? 'high' : plan.steps.length > 2 ? 'medium' : 'low',
-            toolAvailability: availableTools.length,
-            recommendedApproach: plan.steps.length <= 2 ? 'simple' : 'comprehensive',
-            keyInsights: plan.steps.map(s => `${s.tool} — ${s.task}`),
-            potentialChallenges: [],
-          },
-          suggestions: [{
-            id: `needle_plan_${Date.now()}`,
-            name: 'Needle agent plan',
-            description: `Validated ${plan.steps.length}-step tool chain for: ${String(args.problem || '').slice(0, 120)}`,
-            tools: planTools,
-            estimatedDuration: planTools.reduce((sum, t: any) => sum + (t.estimatedDuration || 500), 0),
-            complexity: Math.round(plan.steps.length * 10) / 10,
+        try {
+          const plan = await planTask(
+            String(args.problem || ''), '',
+            undefined, undefined,
+            this.agentToolDecls(),
+            this.resolveGuidance(String(args.problem || '')),
+          );
+          const planTools = [...this.resolvePlanTools(plan.steps).values()];
+          const knownShare = plan.steps.length ? planTools.length / plan.steps.length : 0;
+          return {
+            ok: true,
+            ...this.planFields(plan),
+            thoughts: plan.steps.map(s => ({
+              number: s.step,
+              content: `${s.tool}: ${s.task}`,
+              type: 'planning',
+            })),
+            analysis: {
+              problemComplexity: plan.steps.length > 4 ? 'high' : plan.steps.length > 2 ? 'medium' : 'low',
+              toolAvailability: availableTools.length,
+              recommendedApproach: plan.steps.length <= 2 ? 'simple' : 'comprehensive',
+              keyInsights: plan.steps.map(s => `${s.tool} — ${s.task}`),
+              potentialChallenges: [],
+            },
+            suggestions: [{
+              id: `plan_${Date.now()}`,
+              name: `${plan.source} plan`,
+              description: `${plan.steps.length}-step tool chain for: ${String(args.problem || '').slice(0, 120)}`,
+              tools: planTools,
+              estimatedDuration: planTools.reduce((sum, t: any) => sum + (t.estimatedDuration || 500), 0),
+              complexity: Math.round(plan.steps.length * 10) / 10,
+              confidence: Math.round(knownShare * 100) / 100,
+              reasoning: `${planTools.length}/${plan.steps.length} planned tools resolved against the discovery registry`,
+            }],
             confidence: Math.round(knownShare * 100) / 100,
-            reasoning: `${planTools.length}/${plan.steps.length} planned tools resolved against the discovery registry`,
-          }],
-          confidence: Math.round(knownShare * 100) / 100,
-          reasoning: `Needle produced a validated ${plan.steps.length}-step chain; all reasoning is grounded in registry tools, no template thoughts.`,
-        };
+            reasoning: `${plan.source} produced ${plan.steps.length} step(s); reasoning cites registry tools only.`,
+          };
+        } catch (e) {
+          return this.plannerFailure(e);
+        }
       }
 
       case 'get_tool_chain_analysis':
@@ -897,14 +946,15 @@ export class RequestHandlers {
             this.resolveGuidance(taskText),
           );
           return {
-            ok: true, source: 'needle+skills',
+            ok: true,
+            ...this.planFields(plan),
             steps: plan.steps.map(s => ({
               step: s.step, task: s.task, tool: s.tool, dependsOn: s.dependsOn,
               skillHints: catalog.search(`${s.task} ${s.tool || ''}`).slice(0, 2).map(x => x.name),
             })),
           };
         } catch (e) {
-          return { ok: false, source: 'needle+skills', error: e instanceof Error ? e.message : String(e) };
+          return this.plannerFailure(e);
         }
       }
 

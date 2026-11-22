@@ -59,18 +59,52 @@ describe('planTask (M7: no heuristic fallback)', () => {
   });
 
   test('needle failure falls to openrouter', async () => {
+    const escalation = openrouter([
+      { step: 1, task: 'read', tool: 'alpha' },
+      { step: 2, task: 'unavailable', tool: 'ghost' },
+      { step: 3, task: 'unassigned', recommendedCategory: 'utility' },
+      { step: 4, task: 'save', tool: 'beta' },
+    ]);
+    const generate = escalation.generate;
+    escalation.generate = async request => {
+      assert.match(request.prompt, /"tool"/);
+      assert.match(request.prompt, /alpha/);
+      assert.match(request.prompt, /beta/);
+      return generate();
+    };
     const plan = await planTask('do things', 'alpha', undefined, {
       primary: failingNeedle(),
-      escalation: openrouter([{ step: 1, task: 'solo', recommendedCategory: 'utility' }]),
+      escalation,
     }, DECLS);
-    assert.equal(plan.steps[0].task, 'solo');
+    assert.equal(plan.source, 'or');
+    assert.match(plan.plannerError, /engine down/);
+    assert.equal(plan.omittedSteps, 2);
+    assert.deepEqual(plan.steps.map(({ step, tool, dependsOn }) => [step, tool, dependsOn]), [
+      [1, 'alpha', []], [2, 'beta', [1]],
+    ]);
+  });
+
+  test('large catalogs are scoped and bounded even when no capability matches', async () => {
+    const catalog = Array.from({ length: 376 }, (_, i) => ({ name: `fixture_${i}` }));
+    catalog.push({ name: 'list_directory', description: 'List entries in a directory', server: 'hela-membrane' });
+    for (const [task, expected] of [['List the directory /tmp', 'hela_membrane_list_directory'], ['fixture_375', 'fixture_375']]) {
+      const seen = [];
+      const primary = nativeCalls([{ name: expected, arguments: {} }]);
+      const generate = primary.generate;
+      primary.generate = async request => { seen.push(request.tools); return generate(); };
+      const plan = await planTask(task, '', undefined, { primary, escalation: failingEscalation() }, catalog);
+      assert.equal(seen.length, 1);
+      assert.ok(seen[0].length > 0 && seen[0].length < 10);
+      assert.ok(seen[0].some(tool => tool.name === expected));
+      assert.equal(plan.steps[0].tool, expected);
+    }
   });
 
   test('all providers down throws honest error (no fake plan)', async () => {
     await assert.rejects(() => planTask('do things', 'alpha', undefined, {
       primary: failingNeedle(),
       escalation: failingEscalation(),
-    }, DECLS), /nope/);
+    }, DECLS), /engine down.*nope/);
   });
 
   test('needle garbage with dead escalation throws, not fake plan', async () => {
@@ -83,6 +117,7 @@ describe('planTask (M7: no heuristic fallback)', () => {
   test('unknown tools filtered; empty chain throws', async () => {
     await assert.rejects(() => planTask('do things', 'alpha', undefined, {
       primary: nativeCalls([{ name: 'ghost', arguments: {} }]),
-    }, DECLS), /no plan steps|disabled|not set/);
+      escalation: openrouter([{ step: 1, task: 'unavailable', tool: 'ghost' }, { step: 2, task: 'unassigned' }]),
+    }, DECLS), /no plan steps.*no registry-backed/);
   });
 });

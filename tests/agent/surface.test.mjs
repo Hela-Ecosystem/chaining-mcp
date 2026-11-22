@@ -9,6 +9,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { RequestHandlers } from './.dist/handlers/request-handlers.js';
 import { WorkflowOrchestrator } from './.dist/managers/workflow-orchestrator.js';
 import { NeedleProvider } from './.dist/agent/needle-provider.js';
+import { OpenRouterProvider } from './.dist/agent/openrouter-provider.js';
 import { TimeManager } from './.dist/managers/time-manager.js';
 import { ChainingMCPServer } from './.dist/server.js';
 import { createRuntimeTransport } from './.dist/transport/runtime-transport.js';
@@ -58,6 +59,52 @@ async function connectMcp(t, options) {
 }
 
 describe('M8 handler surface', () => {
+  test('public planners disclose Needle crashes and resolve fallback tools by cell', async (t) => {
+    // Decomposition only consults the planner when the agent runtime is on;
+    // without the flag it routes to the LLM manager, which this fixture omits.
+    const previousAgentFlag = process.env.MITOSIS_AGENT_ENABLED;
+    process.env.MITOSIS_AGENT_ENABLED = 'true';
+    t.after(() => {
+      if (previousAgentFlag === undefined) delete process.env.MITOSIS_AGENT_ENABLED;
+      else process.env.MITOSIS_AGENT_ENABLED = previousAgentFlag;
+    });
+    t.mock.method(NeedleProvider.prototype, 'generate', async () => { throw new Error('needle server exited during startup'); });
+    const tools = ['hela-membrane', 'hela-genome'].map(serverName => ({
+      name: 'read_file', description: `Read a file from ${serverName}`, serverName, inputSchema: { type: 'object' },
+    }));
+    const h = new RequestHandlers({ getTools: () => tools }, {}, {}, {}, {}, new WorkflowOrchestrator());
+    const fallback = t.mock.method(OpenRouterProvider.prototype, 'generate', async () => ({
+      text: JSON.stringify([
+        { step: 1, task: 'read the file', tool: 'hela_membrane_read_file' },
+        { step: 2, task: 'use an ambiguous tool', tool: 'read_file' },
+        { step: 3, task: 'tool-less' },
+      ]), modelUsed: 'fixture', latencyMs: 1,
+    }));
+    for (const [name, extract] of [
+      ['llm_suggest_route', r => r.routes[0].tools[0].serverName],
+      ['generate_route_suggestions', r => r.routes[0].tools[0]],
+      ['llm_decompose_task', r => r.subtasks[0].tool],
+      ['analyze_with_sequential_thinking', r => r.suggestions[0].tools[0].serverName],
+      ['suggest_skill_chain', r => r.steps[0].tool],
+    ]) {
+      const result = await h.handleToolCall(name, { task: 'Read a file', problem: 'Read a file' });
+      assert.equal(result.ok, true, name);
+      assert.equal(result.source, 'openrouter', name);
+      assert.equal(result.degraded, true, name);
+      assert.match(result.plannerError, /needle server exited during startup/);
+      assert.equal(result.omittedSteps, 2, name);
+      assert.match(extract(result), /^(hela-membrane|hela_membrane_read_file)$/);
+      assert.doesNotMatch(JSON.stringify(result), /Validated|grounded|tool-less/);
+    }
+
+    fallback.mock.mockImplementation(async () => ({ text: '[{"step":1,"task":"tool-less"}]' }));
+    const result = await h.handleToolCall('generate_route_suggestions', { task: 'Read a file' });
+    assert.equal(result.ok, false);
+    assert.match(result.plannerError, /needle server exited during startup/);
+    assert.match(result.error, /no registry-backed/);
+    assert.equal(result.routes, undefined);
+  });
+
   test('MCP workflow dispatches to the named cell and retains Mitosis local tools', async (t) => {
     const seen = [];
     const runtimeTransport = async (cell, tool, args, signal) => {

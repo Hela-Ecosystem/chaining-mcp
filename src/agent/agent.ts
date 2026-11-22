@@ -1,6 +1,6 @@
-import { AgentDecisionSchema, AgentPlanSchema, type AgentDecision, type AgentPlan, type ModelProvider, type ModelRequest } from './schemas.js';
+import { AgentDecisionSchema, AgentPlanStepSchema, type AgentDecision, type AgentPlan, type ModelProvider, type ModelRequest } from './schemas.js';
 import { NeedleProvider } from './needle-provider.js';
-import { currentTimeTools, scopeToolsForTask } from './capability-graph.js';
+import { currentTimeTools, rankToolsForTask, scopeToolsForTask, type ToolDecl } from './capability-graph.js';
 import { recallEpisodicMemory, retainWorkflowDecision } from './episodic-retention.js';
 import { OpenRouterProvider } from './openrouter-provider.js';
 import type { AgentStateManager, TerminationReason } from './state.js';
@@ -505,58 +505,81 @@ export async function agentStep(input: AgentStepInput): Promise<{
   return { sessionId: session.id, decision, result, error, escalated, stats: manager.stats(session.id), tail: manager.tail(session.id, 6) };
 }
 
-export interface PlanToolDecl { name: string; description?: string; schema?: unknown }
+export function planToolName(name: string, server?: string): string {
+  if (!server) return name;
+  const prefix = `${server.replace(/-/g, '_')}_`;
+  return name.startsWith(prefix) ? name : prefix + name;
+}
+
+export interface PlanProvenance {
+  source: string;
+  plannerError?: string;
+  omittedSteps?: number;
+}
+
+export class PlannerError extends Error {
+  constructor(message: string, readonly plannerError?: string) {
+    super(plannerError ? `Needle failed: ${plannerError}; ${message}` : message);
+  }
+}
+
+const MAX_NEEDLE_PLAN_TOOLS = 8;
+const MAX_ESCALATION_PLAN_TOOLS = 30;
+const MAX_PLAN_STEPS = 6;
+const escalationStepSchema = AgentPlanStepSchema.pick({ task: true, tool: true, recommendedCategory: true });
 
 /** Single-shot planner: one bare-task turn with real tools declared; the
  *  model emits the whole chain as function_calls. No confidence gate —
  *  planning has no side effects and multi-call chains calibrate low. */
-async function planIterative(
-  needle: NeedleProvider | ModelProvider,
+async function planWithNeedle(
+  needle: NeedleProvider,
   task: string,
-  toolDecls: PlanToolDecl[],
+  toolDecls: ToolDecl[],
   signal?: AbortSignal,
-  maxSteps = 6,
   guidance?: string,
-): Promise<AgentPlan> {
-  const tools = toolDecls.map(t => ({ name: t.name, description: t.description || t.name, schema: t.schema || { type: 'object' } }));
+): Promise<AgentPlan & PlanProvenance> {
+  const tools = toolDecls.map(t => ({ name: planToolName(t.name, t.server), description: t.description || t.name, schema: t.schema }));
   const known = new Set(tools.map(t => t.name));
-  const api = needle as Partial<NeedleProvider>;
-  let lastError: Error | undefined;
+  const failures = new Set<string>();
+  const combined = [guidance, recallEpisodicMemory(task)].filter(Boolean).join('\n');
+  const prompt = combined ? `${task.slice(0, 500)}\n\nGuidance:\n${combined}` : task.slice(0, 500);
   try {
     // Small model + single-shot chains occasionally emit truncated JSON or an
     // empty refusal; one transparent retry smooths the stochastic tail before
     // falling back to OpenRouter.
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const episodic = recallEpisodicMemory(task);
-        const combined = [guidance, episodic].filter(Boolean).join('\n') || undefined;
-        const prompt = combined ? `${task.slice(0, 500)}\n\nGuidance:\n${combined}` : task.slice(0, 500);
+        signal?.throwIfAborted();
         const res = await needle.generate({ prompt, signal, tools });
         const native = JSON.parse(res.text);
-        const calls = (native.function_calls || []).filter((c: { name: string }) => known.has(c.name)).slice(0, maxSteps);
+        const proposed: Array<{ name: string; arguments?: unknown } | null> = native.function_calls ?? [];
+        if (!Array.isArray(proposed)) throw new Error('needle returned invalid function calls');
+        const calls = proposed
+          .filter((c): c is { name: string; arguments?: unknown } => c !== null && known.has(c.name))
+          .slice(0, MAX_PLAN_STEPS);
         if (!calls.length) {
-          lastError = new Error('needle produced no plan steps');
+          failures.add('needle produced no plan steps with a declared tool');
           continue;
         }
-        const rawSteps = calls.map((c: { name: string; arguments: unknown }, i: number) => ({
+        const rawSteps = calls.map((c, i) => ({
           step: i + 1,
           task: describeArgs(c.name, c.arguments),
           tool: c.name,
           args: c.arguments,
         }));
-        const chained = parallelize(rawSteps, task);
-        return AgentPlanSchema.parse({
-          task,
-          steps: chained.map(({ step, task: t, tool, dependsOn }) => ({ step, task: t, tool, dependsOn })),
-        });
+        return {
+          task, steps: parallelize(rawSteps, task), source: 'needle',
+          plannerError: failures.size ? [...failures].join('; ') : undefined,
+          omittedSteps: proposed.length - calls.length || undefined,
+        };
       } catch (e) {
-        lastError = e instanceof Error ? e : new Error(String(e));
-        if (signal?.aborted) throw e;
+        signal?.throwIfAborted();
+        failures.add(e instanceof Error ? e.message : String(e));
       }
     }
-    throw lastError ?? new Error('needle produced no plan steps');
+    throw new Error([...failures].join('; '));
   } finally {
-    api.stopServer?.();
+    needle.stopServer?.();
   }
 }
 
@@ -593,47 +616,62 @@ export function parallelize(
   });
 }
 
-/**
- * Milestone 3: Needle-first task decomposition.
- * Declares the REAL tools and builds the plan iteratively: each turn asks
- * Needle for the next step given the planned steps so far, stopping on
- * respond/refusal/repeat/low confidence (max 6 steps). A `define_step`
- * pseudo-tool does NOT work — the model semantically matches the task
- * against declared tools and refuses meta-tools with an empty call.
- * Falls back to OpenRouter. M7: no heuristic fallback — when both
- * providers fail the call throws an honest error instead of a fake
- * analysis → utility → validation plan.
- */
+/** Plan against the discovered tools, retaining the primary failure on fallback. */
 export async function planTask(
   task: string,
-  availableToolsSummary: string,
+  _availableToolsSummary: string,
   signal?: AbortSignal,
   providers?: { primary?: NeedleProvider; escalation?: ModelProvider },
-  toolDecls?: PlanToolDecl[],
+  toolDecls: ToolDecl[] = [],
   guidance?: string,
-): Promise<AgentPlan> {
-  const needle = providers?.primary ?? new NeedleProvider();
-  try {
-    if (toolDecls && toolDecls.length) {
-      return await planIterative(needle, task, toolDecls, signal, 6, guidance);
+): Promise<AgentPlan & PlanProvenance> {
+  signal?.throwIfAborted();
+  const clockTools = currentTimeTools(toolDecls, task);
+  const available = clockTools ?? toolDecls;
+  if (!available.length) throw new PlannerError('No registry tools are available for this task');
+
+  let plannerError: string | undefined;
+  if (providers?.primary || process.env.MITOSIS_AGENT_ENABLED?.toLowerCase() !== 'false') {
+    const candidates = available.length > MAX_NEEDLE_PLAN_TOOLS
+      ? scopeToolsForTask(available, task, { useEpisodicMemory: true }).tools
+      : available;
+    const shortlist = rankToolsForTask(candidates, task).slice(0, MAX_NEEDLE_PLAN_TOOLS);
+    try {
+      return await planWithNeedle(providers?.primary ?? new NeedleProvider(), task, shortlist, signal, guidance);
+    } catch (e) {
+      signal?.throwIfAborted();
+      plannerError = e instanceof Error ? e.message : String(e);
     }
-    // No structured decls: skip straight to escalation (the define_step
-    // pseudo-tool is refused by the model — removed in M7).
-  } catch { /* fall through to escalation */ }
-  finally { (needle as Partial<NeedleProvider>).stopServer?.(); }
+  }
 
   const escalation = providers?.escalation ?? new OpenRouterProvider();
-  const res = await escalation.generate({
-    prompt: `Decompose into 3-6 ordered steps as JSON array [{"step":1,"task":"...","recommendedCategory":"..."}]. Task: ${task}. Tools: ${availableToolsSummary.slice(0, 1500)}`,
-    systemPrompt: 'You are a task decomposition engine. Output valid JSON only, no fences.',
-    signal,
-  });
-  const cleaned = res.text.replace(/```json/g, '').replace(/```/g, '').trim();
-  if (!cleaned) throw new Error('escalation provider returned an empty plan');
+  const tools = rankToolsForTask(available, task).slice(0, MAX_ESCALATION_PLAN_TOOLS)
+    .map(t => ({ name: planToolName(t.name, t.server), description: compact(t.description || t.name, 160) }));
+  const known = new Set(tools.map(t => t.name));
   try {
-    const steps = JSON.parse(cleaned);
-    return AgentPlanSchema.parse({ task, steps: steps.map((s: Record<string, unknown>) => ({ dependsOn: [], ...s })) });
+    const res = await escalation.generate({
+      prompt: `Plan up to ${MAX_PLAN_STEPS} ordered steps as a JSON array [{"task":"...","tool":"exact_name_from_list","recommendedCategory":"..."}]. Each step must use one exact name from Tools. Omit tasks that have no matching tool.\nTask: ${task}\nTools:\n${tools.map(t => `- ${t.name}: ${t.description}`).join('\n')}`,
+      systemPrompt: 'You are a task decomposition engine. Output valid JSON only, no fences.',
+      signal,
+    });
+    const cleaned = res.text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const proposed: unknown = cleaned ? JSON.parse(cleaned) : [];
+    if (!Array.isArray(proposed)) throw new Error('expected a JSON array');
+    const steps: AgentPlan['steps'] = [];
+    for (const entry of proposed) {
+      const parsed = escalationStepSchema.safeParse(entry);
+      if (!parsed.success || !known.has(parsed.data.tool)) continue;
+      const previous = steps.length;
+      steps.push({ ...parsed.data, step: previous + 1, dependsOn: previous ? [previous] : [] });
+      if (steps.length === MAX_PLAN_STEPS) break;
+    }
+    if (!steps.length) throw new Error('no registry-backed plan steps');
+    return {
+      task, steps, source: escalation.metadata().name, plannerError,
+      omittedSteps: proposed.length - steps.length || undefined,
+    };
   } catch (e) {
-    throw new Error(`escalation provider returned unparseable plan: ${e instanceof Error ? e.message : String(e)}`);
+    signal?.throwIfAborted();
+    throw new PlannerError(`Escalation failed: ${e instanceof Error ? e.message : String(e)}`, plannerError);
   }
 }
