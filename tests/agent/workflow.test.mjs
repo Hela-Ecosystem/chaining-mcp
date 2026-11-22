@@ -1,6 +1,8 @@
 import { test, describe } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import { WorkflowOrchestrator } from './.dist/managers/workflow-orchestrator.js';
+import { RunStore } from './.dist/agent/run-store.js';
 import { planToWorkflow, runAgentWorkflow } from './.dist/agent/workflow.js';
 
 const okTransport = (impl) => async (server, tool, params, signal) => impl(tool, params, { server, signal });
@@ -16,11 +18,13 @@ const call = (tool, args = {}) => JSON.stringify({ action: 'call_tool', tool, ar
 const done = (result = 'ok') => JSON.stringify({ action: 'complete', result });
 
 describe('WorkflowOrchestrator transport seam', () => {
-  test('placeholder default unchanged (no transport)', async () => {
+  test('unbound workflow fails without fabricating a result', async () => {
     const o = new WorkflowOrchestrator();
     const r = await o.executeWorkflow({ workflowId: 'w1', name: 'w', steps: [{ id: 'a', serverName: 's', toolName: 'thing', parameters: {} }] });
-    assert.equal(r.status, 'completed');
-    assert.ok(r.overallResult.a.message.includes('thing'));
+    assert.equal(r.status, 'failed');
+    assert.equal(r.steps[0].status, 'failed');
+    assert.match(r.steps[0].error, /no transport bound/i);
+    assert.equal(r.steps[0].result, undefined);
   });
 
   test('bound transport receives calls with resolved params', async () => {
@@ -46,6 +50,75 @@ describe('WorkflowOrchestrator transport seam', () => {
     assert.equal(r.status, 'completed');
     assert.equal(n, 3);
     assert.equal(r.steps[0].retryCount, 2);
+  });
+
+  test('returned failure retries and only the successful result reaches dependents', async () => {
+    const o = new WorkflowOrchestrator();
+    let calls = 0;
+    o.setTransport(okTransport((tool, params) => {
+      if (tool === 'consume') return params;
+      return ++calls === 1 ? { success: false, error: 'transient', value: 'bad' } : { value: 'good' };
+    }));
+    const r = await o.executeWorkflow({
+      workflowId: 'returned-retry', name: 'w', failFast: true,
+      steps: [
+        { id: 'a', serverName: 's', toolName: 'produce', parameters: {}, retryOnFailure: true },
+        { id: 'b', serverName: 's', toolName: 'consume', parameters: {}, dependsOn: ['a'], outputMapping: { value: 'a.value' } },
+      ],
+    });
+    assert.equal(r.status, 'completed');
+    assert.equal(calls, 2);
+    assert.equal(r.steps[0].retryCount, 1);
+    assert.deepEqual(r.steps[1].result, { value: 'good' });
+  });
+
+  test('returned failures exhaust configured retries and failFast stops further steps', async () => {
+    for (const failFast of [true, false]) {
+      const o = new WorkflowOrchestrator();
+      const calls = [];
+      o.setTransport(okTransport((tool) => {
+        calls.push(tool);
+        return tool === 'bad' ? { isError: true, content: [{ type: 'text', text: 'offline' }] } : {};
+      }));
+      const r = await o.executeWorkflow({
+        workflowId: `returned-fail-${failFast}`, name: 'w', failFast,
+        steps: [
+          { id: 'a', serverName: 's', toolName: 'bad', parameters: {}, retryOnFailure: true, maxRetries: 2 },
+          { id: 'b', serverName: 's', toolName: 'next', parameters: {}, dependsOn: ['a'] },
+        ],
+      });
+      assert.equal(r.status, 'failed');
+      assert.equal(r.steps[0].status, 'failed');
+      assert.equal(r.steps[0].error, 'offline');
+      assert.equal(r.steps[0].retryCount, 2);
+      assert.equal(r.steps[0].result, undefined);
+      assert.equal(r.overallResult.summary.failedSteps, 1);
+      assert.deepEqual(calls, failFast ? ['bad', 'bad', 'bad'] : ['bad', 'bad', 'bad', 'next']);
+    }
+  });
+
+  test('resume reports a saved error that was previously recorded as completed', async (t) => {
+    const o = new WorkflowOrchestrator();
+    const store = new RunStore(':memory:');
+    t.after(() => store.close());
+    const workflowId = 'legacy-error';
+    store.createRun('legacy', { runId: workflowId, workflowId });
+    store.startStep(workflowId, 'a', 's', 'bad', {});
+    store.saveStepResult(workflowId, 'a', { ok: false, error: 'saved error' });
+    store.finishStep(workflowId, 'a', 'completed', 'ok');
+    const calls = [];
+    o.setTransport(okTransport(tool => { calls.push(tool); return {}; }));
+    const r = await o.executeWorkflow({
+      workflowId, name: 'w', failFast: true,
+      steps: [
+        { id: 'a', serverName: 's', toolName: 'bad', parameters: {} },
+        { id: 'b', serverName: 's', toolName: 'next', parameters: {}, dependsOn: ['a'] },
+      ],
+    }, undefined, { runStore: store, resume: true });
+    assert.equal(r.status, 'failed');
+    assert.equal(r.steps[0].error, 'saved error');
+    assert.equal(store.getStep(workflowId, 'a').status, 'failed');
+    assert.deepEqual(calls, []);
   });
 
   test('retries exhausted marks step failed (no failFast)', async () => {
@@ -86,6 +159,29 @@ describe('WorkflowOrchestrator transport seam', () => {
     ctl.abort();
     const r = await p;
     assert.equal(r.status, 'cancelled');
+  });
+
+  test('workflow cancellation and deadline abort an in-flight transport without retrying', async () => {
+    for (const timeout of [undefined, 20]) {
+      const o = new WorkflowOrchestrator();
+      let calls = 0;
+      o.setTransport(async (_server, _tool, _args, signal) => {
+        calls++;
+        await delay(1_000, undefined, { signal });
+        return { ok: true };
+      });
+      const workflowId = timeout ? 'timed-out' : 'cancelled';
+      const pending = o.executeWorkflow({
+        workflowId, name: 'w', timeout,
+        steps: [{ id: 'a', serverName: 's', toolName: 'long', parameters: {}, retryOnFailure: true }],
+      });
+      if (!timeout) assert.equal(o.cancelWorkflow(workflowId), true);
+      const r = await pending;
+      assert.equal(r.status, timeout ? 'failed' : 'cancelled');
+      assert.match(r.error, timeout ? /timed out/ : /cancelled/);
+      assert.equal(r.steps[0].status, 'failed');
+      assert.equal(calls, 1);
+    }
   });
 
   test('executeTool registry guard', async () => {

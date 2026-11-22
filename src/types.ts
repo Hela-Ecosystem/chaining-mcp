@@ -196,7 +196,7 @@ export const WorkflowStepSchema = z.object({
   dependsOn: z.array(z.string()).optional().describe('IDs of steps that must complete before this step'),
   outputMapping: z.record(z.string(), z.string()).optional().describe('Map outputs from this step to input parameters for dependent steps'),
   retryOnFailure: z.boolean().optional().describe('Whether to retry this step on failure'),
-  maxRetries: z.number().optional().describe('Maximum number of retries'),
+  maxRetries: z.int().nonnegative().optional().describe('Maximum number of retries'),
   idempotent: z.boolean().optional().describe('P0-B3: true = safe to re-run after an unknown outcome; false/absent = resume must NOT blindly replay'),
 });
 
@@ -206,7 +206,7 @@ export const WorkflowOrchestratorSchema = z.object({
   description: z.string().optional().describe('Description of what this workflow does'),
   steps: z.array(WorkflowStepSchema).describe('Array of workflow steps to execute'),
   failFast: z.boolean().optional().describe('Whether to stop execution on first failure'),
-  timeout: z.number().optional().describe('Maximum execution time in milliseconds'),
+  timeout: z.int().positive().max(2_147_483_647).optional().describe('Maximum execution time in milliseconds'),
   variables: z.record(z.string(), z.any()).optional().describe('Global variables available to all steps'),
 });
 

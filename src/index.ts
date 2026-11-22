@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { ChainingMCPServer } from './server.js';
+import { createRuntimeTransport } from './transport/runtime-transport.js';
 
 function parseArgs(args: string[]) {
   let transport: 'stdio' | 'http' | undefined;
@@ -29,7 +30,10 @@ function parseArgs(args: string[]) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const server = new ChainingMCPServer();
+  const runtimeUrl = process.env.HELA_RUNTIME_URL;
+  const server = new ChainingMCPServer({
+    runtimeTransport: runtimeUrl ? createRuntimeTransport(new URL(runtimeUrl)) : undefined,
+  });
 
   // Handle graceful shutdown
   const shutdown = async () => {

@@ -14,6 +14,7 @@ import { sharedSkills } from '../skills/skill-discovery.js';
 import { MCP_SERVER_VERSION } from '../version.js';
 import { currentTimeTools } from '../agent/capability-graph.js';
 import { timeManagementTools } from '../tools/time-management-tools.js';
+import { WorkflowOrchestratorSchema } from '../types.js';
 
 export class RequestHandlers {
   constructor(
@@ -26,7 +27,7 @@ export class RequestHandlers {
     private llmManager?: LLMManager
   ) {}
 
-  async handleToolCall(name: string, args: any): Promise<any> {
+  async handleToolCall(name: string, args: any, signal?: AbortSignal): Promise<any> {
     const defaultMs = parseInt(process.env.CHAINING_TOOL_TIMEOUT_MS || '10000', 10);
     // Model-backed tools carry their own budget (planning + multi-turn
     // inference + engine cold-start routinely exceed the interactive 10s).
@@ -36,11 +37,18 @@ export class RequestHandlers {
     const timeoutMs = modelBacked
       ? Math.min(Number(args?.maxExecutionMs) || 90000, 300000)
       : defaultMs;
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Tool '${name}' execution timed out after ${timeoutMs}ms`)), timeoutMs)
-    );
-
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
     try {
+      signal?.throwIfAborted();
+      if (name === 'workflow_orchestrator') {
+        return await this.handleSequentialThinkingTool(name, args, signal, defaultMs);
+      }
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Tool '${name}' execution timed out after ${timeoutMs}ms`)), timeoutMs);
+        onAbort = () => reject(signal?.reason);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
       return await Promise.race([
         this.executeTool(name, args || {}),
         timeoutPromise
@@ -51,6 +59,9 @@ export class RequestHandlers {
         error: error instanceof Error ? error.message : 'Unknown error',
         tool: name,
       };
+    } finally {
+      clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
     }
   }
 
@@ -66,7 +77,7 @@ export class RequestHandlers {
     }
 
     // Sequential Thinking Tools
-    if (['brainstorming', 'workflow_orchestrator'].includes(name)) {
+    if (name === 'brainstorming') {
       return await this.handleSequentialThinkingTool(name, args);
     }
 
@@ -748,7 +759,7 @@ export class RequestHandlers {
     return errors;
   }
 
-  private async handleSequentialThinkingTool(name: string, args: any): Promise<any> {
+  private async handleSequentialThinkingTool(name: string, args: any, signal?: AbortSignal, defaultTimeout?: number): Promise<any> {
     switch (name) {
       case 'brainstorming': {
         // M7: template ideas + random scores deleted. Ideation needs a
@@ -805,8 +816,12 @@ export class RequestHandlers {
         };
       }
 
-      case 'workflow_orchestrator':
-        const workflowResult = await this.workflowOrchestrator.executeWorkflow(args);
+      case 'workflow_orchestrator': {
+        const workflow = WorkflowOrchestratorSchema.parse(args);
+        const workflowResult = await this.workflowOrchestrator.executeWorkflow({
+          ...workflow,
+          timeout: workflow.timeout ?? defaultTimeout,
+        }, signal);
         return {
           workflowId: workflowResult.workflowId,
           status: workflowResult.status,
@@ -829,6 +844,7 @@ export class RequestHandlers {
           completedAt: workflowResult.completedAt,
           error: workflowResult.error,
         };
+      }
 
       default:
         throw new Error(`Unknown sequential thinking tool: ${name}`);

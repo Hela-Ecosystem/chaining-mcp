@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChainingMCPServer } from '../../dist/server.js';
+import { ChainingMCPServer } from './.dist/server.js';
 
 test('MCP 2026 Stateless HTTP Adapter (P2-D1)', async (t) => {
   const server = new ChainingMCPServer();

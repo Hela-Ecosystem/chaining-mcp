@@ -61,6 +61,7 @@ describe('HelaResult envelope (P1-C1 Mitosis adapter)', () => {
 
   test('executeTool default stays raw (back-compat)', async () => {
     const o = new WorkflowOrchestrator();
+    o.setTransport(async () => ({ success: true }));
     const r = await o.executeTool('thing', {});
     assert.equal(r.success, true);
     assert.ok(!('artifacts' in r));
@@ -69,6 +70,7 @@ describe('HelaResult envelope (P1-C1 Mitosis adapter)', () => {
 
   test('executeTool envelope:true returns envelope, data=raw', async () => {
     const o = new WorkflowOrchestrator();
+    o.setTransport(async () => ({ success: true }));
     const r = await o.executeTool('thing', {}, { serverName: 's', envelope: true });
     assert.ok(isHelaResult(r));
     assert.equal(r.data.success, true);
@@ -80,6 +82,7 @@ describe('HelaResult envelope (P1-C1 Mitosis adapter)', () => {
     try {
       store.createRun('t', { runId: 'r1', workflowId: 'r1' });
       const o = new WorkflowOrchestrator();
+      o.setTransport(async () => ({ success: true }));
       o.attachRunStore(store);
       const r = await o.executeTool('thing', {}, {
         serverName: 's', envelope: true, run: { run_id: 'r1', step_id: 's1', attempt: 1, policy_profile: 'full-access' },

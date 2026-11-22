@@ -12,7 +12,7 @@ import { SmartRouteOptimizer } from './core/optimizer.js';
 import { TimeManager } from './managers/time-manager.js';
 import { PromptRegistry } from './prompts/prompt-registry.js';
 import { AwesomeCopilotIntegration } from './integrations/awesome-copilot-integration.js';
-import { WorkflowOrchestrator } from './managers/workflow-orchestrator.js';
+import { WorkflowOrchestrator, type MCPTransport } from './managers/workflow-orchestrator.js';
 import { LLMManager } from './managers/llm-manager.js';
 
 import { allTools } from './tools/tool-registry.js';
@@ -22,6 +22,10 @@ import { RequestHandlers } from './handlers/request-handlers.js';
 import { HttpAdapter } from './transport/http-adapter.js';
 import { RunStore } from './agent/run-store.js';
 import { MCP_SERVER_VERSION } from './version.js';
+
+const LOCAL_SERVERS = new Set(['local', 'hela-mitosis', 'mitosis', 'chaining-mcp', 'chaining-mcp-server']);
+const LOCAL_TOOLS = new Set(allTools.map(tool => tool.name));
+const NON_REENTRANT = new Set(['workflow_orchestrator', 'agent_run']);
 
 export class ChainingMCPServer {
   private server: Server;
@@ -38,7 +42,7 @@ export class ChainingMCPServer {
   private httpAdapter?: HttpAdapter;
   private isInitialized: boolean = false;
 
-  constructor() {
+  constructor({ runtimeTransport }: { runtimeTransport?: MCPTransport } = {}) {
     // Initialize core services
     this.discovery = new MCPServerDiscovery();
     this.optimizer = new SmartRouteOptimizer();
@@ -67,17 +71,19 @@ export class ChainingMCPServer {
       this.llmManager
     );
 
-    // Milestone 8: workflow steps execute against the real local tool
-    // implementations. Self-recursive entries are refused so a workflow or
-    // agent run can never invoke itself.
-    const NON_REENTRANT = new Set(['workflow_orchestrator', 'agent_run']);
-    this.workflowOrchestrator.setTransport((serverName, toolName, parameters, signal) => {
-      if (NON_REENTRANT.has(toolName)) {
-        return Promise.reject(new Error(`tool '${toolName}' is not re-entrant inside workflows`));
+    this.workflowOrchestrator.setTransport(async (serverName, toolName, parameters, signal) => {
+      const isLocal = LOCAL_SERVERS.has(serverName);
+      const prefix = isLocal ? 'hela_mitosis_' : `${serverName.replace(/-/g, '_')}_`;
+      const name = toolName.startsWith(prefix) ? toolName.slice(prefix.length) : toolName;
+      if (NON_REENTRANT.has(name)) {
+        throw new Error(`tool '${name}' is not re-entrant inside workflows`);
       }
-      void serverName;
-      void signal;
-      return this.requestHandlers.handleToolCall(toolName, parameters);
+      if (!isLocal) {
+        if (!runtimeTransport) throw new Error(`No runtime transport bound for server '${serverName}'`);
+        return runtimeTransport(serverName, name, parameters, signal);
+      }
+      if (!LOCAL_TOOLS.has(name)) throw new Error(`Unknown tool: ${name}`);
+      return this.requestHandlers.handleToolCall(name, parameters, signal);
     });
 
     this.runStore = new RunStore();
@@ -114,13 +120,13 @@ export class ChainingMCPServer {
     });
 
     // Call tool handler
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request, { signal }) => {
       const { name, arguments: args } = request.params;
 
       try {
         await this.ensureInitialized();
 
-        const result = await this.requestHandlers.handleToolCall(name, args);
+        const result = await this.requestHandlers.handleToolCall(name, args, signal);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };

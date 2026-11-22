@@ -193,6 +193,7 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 | `MEMORY_FILE_PATH` | `./data/memory.json` | Persistent cache file |
 | `HELA_POLICY_PROFILE` | `full-access` | Capability policy profile (`full-access` = legacy behavior; `constrained` denies R3 tools such as remote shell) |
 | `HELA_RUNSTORE_PATH` | `./hela-runs.db` | SQLite WAL run/event store for durable workflows + kill-9 resume |
+| `HELA_RUNTIME_URL` | unset | HeLa Runtime Streamable HTTP endpoint for workflow steps targeting sibling cells, e.g. `http://127.0.0.1:8787/mcp`. Mitosis steps use its local tool registry. |
 | `HELA_NEEDLE_THRESHOLD_<FAMILY>` | per-family | Override Needle confidence threshold for a tool family, e.g. `HELA_NEEDLE_THRESHOLD_SHELL=0.8` (strictest family among a call's tools wins) |
 
 ### Zero-Key & Offline

@@ -1,11 +1,17 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { RequestHandlers } from './.dist/handlers/request-handlers.js';
 import { WorkflowOrchestrator } from './.dist/managers/workflow-orchestrator.js';
 import { NeedleProvider } from './.dist/agent/needle-provider.js';
 import { TimeManager } from './.dist/managers/time-manager.js';
+import { ChainingMCPServer } from './.dist/server.js';
+import { createRuntimeTransport } from './.dist/transport/runtime-transport.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'skills');
 
@@ -32,7 +38,113 @@ const localTransport = async (server, tool, params) => {
   throw new Error(`unknown tool ${tool}`);
 };
 
+async function connectMcp(t, options) {
+  const server = new ChainingMCPServer(options);
+  const mcp = server.createMcpServer();
+  const client = new Client({ name: 'workflow-test', version: '1' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  t.after(async () => {
+    await client.close();
+    await mcp.close();
+    await server.stop();
+  });
+  await mcp.connect(serverTransport);
+  await client.connect(clientTransport);
+  return async (name, args) => {
+    const reply = await client.callTool({ name, arguments: args });
+    assert.equal(reply.isError, undefined);
+    return JSON.parse(reply.content[0].text);
+  };
+}
+
 describe('M8 handler surface', () => {
+  test('MCP workflow dispatches to the named cell and retains Mitosis local tools', async (t) => {
+    const seen = [];
+    const runtimeTransport = async (cell, tool, args, signal) => {
+      seen.push([cell, tool, args]);
+      assert.ok(signal instanceof AbortSignal);
+      return { source: cell };
+    };
+    const call = await connectMcp(t, { runtimeTransport });
+    const workflow = await call('workflow_orchestrator', {
+      workflowId: 'named-cell-workflow', name: 'named cell', failFast: true,
+      steps: [
+        { id: 'a', serverName: 'hela-mitosis', toolName: 'get_current_time', parameters: { timezone: 'UTC' } },
+        { id: 'b', serverName: 'hela-membrane', toolName: 'get_current_time', parameters: { path: 'fixture' }, dependsOn: ['a'] },
+      ],
+    });
+    assert.equal(workflow.status, 'completed');
+    assert.equal(workflow.steps[0].result.timezone, 'UTC');
+    assert.deepEqual(workflow.steps[1].result, { source: 'hela-membrane' });
+    assert.deepEqual(seen, [['hela-membrane', 'get_current_time', { path: 'fixture' }]]);
+  });
+
+  test('MCP workflow routes through hela.pipe and retries a returned runtime error', async (t) => {
+    const calls = [];
+    const runtime = createServer(async (req, res) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405).end();
+        return;
+      }
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const request = JSON.parse(Buffer.concat(chunks));
+      if (request.method === 'notifications/initialized') {
+        res.writeHead(202).end();
+        return;
+      }
+      let result;
+      if (request.method === 'initialize') {
+        result = { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'runtime-fixture', version: '1' } };
+      } else {
+        calls.push(request.params);
+        const failed = calls.length === 1;
+        const payload = failed ? { ok: false, error: 'temporarily unavailable' } : {
+          ok: true,
+          results: [{ ok: true, result: { content: [{ type: 'text', text: '{"size":42}' }] } }],
+        };
+        result = { isError: failed, content: [{ type: 'text', text: JSON.stringify(payload) }] };
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+    });
+    runtime.listen(0, '127.0.0.1');
+    t.after(() => new Promise(resolve => runtime.close(resolve)));
+    await once(runtime, 'listening');
+    const runtimeTransport = createRuntimeTransport(new URL(`http://127.0.0.1:${runtime.address().port}/mcp`));
+    const call = await connectMcp(t, { runtimeTransport });
+    const workflow = await call('workflow_orchestrator', {
+      workflowId: 'pipe-workflow', name: 'pipe', failFast: true,
+      steps: [{ id: 'a', serverName: 'hela-membrane', toolName: 'hela_membrane_get_file_info', parameters: { path: 'fixture' }, retryOnFailure: true, maxRetries: 1 }],
+    });
+    const request = { name: 'hela.pipe', arguments: { steps: [{ cell: 'hela-membrane', tool: 'get_file_info', args: { path: 'fixture' } }] } };
+    assert.deepEqual(calls, [request, request]);
+    assert.equal(workflow.status, 'completed');
+    assert.equal(workflow.steps[0].retryCount, 1);
+    assert.deepEqual(workflow.steps[0].result, { size: 42 });
+  });
+
+  test('MCP workflow without a runtime fails sibling steps and honors local errors', async (t) => {
+    const call = await connectMcp(t);
+    const sibling = await call('workflow_orchestrator', {
+      workflowId: 'no-runtime-workflow', name: 'no runtime',
+      steps: [{ id: 'a', serverName: 'hela-membrane', toolName: 'get_current_time', parameters: {} }],
+    });
+    assert.equal(sibling.status, 'failed');
+    assert.match(sibling.steps[0].error, /runtime transport.*hela-membrane/i);
+
+    const local = await call('workflow_orchestrator', {
+      workflowId: 'local-error-workflow', name: 'local error', failFast: true,
+      steps: [
+        { id: 'a', serverName: 'hela-mitosis', toolName: 'get_current_time', parameters: { timezone: 'invalid/timezone' }, retryOnFailure: true },
+        { id: 'b', serverName: 'hela-mitosis', toolName: 'get_current_time', parameters: {}, dependsOn: ['a'] },
+      ],
+    });
+    assert.equal(local.status, 'failed');
+    assert.equal(local.steps.length, 1);
+    assert.equal(local.steps[0].status, 'failed');
+    assert.equal(local.steps[0].retryCount, 1);
+  });
+
   test('workflow_status / workflow_cancel round-trip', async () => {
     const { h, o } = handlers(localTransport);
     const wf = await o.executeWorkflow({ workflowId: 'wstat', name: 'w', steps: [{ id: 'a', serverName: 't', toolName: 'get_time', parameters: {} }] });
