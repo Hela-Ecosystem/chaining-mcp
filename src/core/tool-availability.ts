@@ -1,3 +1,5 @@
+import { ToolInfo } from '../types.js';
+
 /**
  * Tool availability, with three outcomes instead of two.
  *
@@ -11,7 +13,21 @@ export interface AvailabilityResult {
   warnings: string[];
 }
 
-export function checkToolAvailability(toolChain: any[], availableTools: any[]): AvailabilityResult {
+export function indexToolsByServer(availableTools: ToolInfo[]) {
+  const byServer = new Map<string, Map<string, ToolInfo>>();
+  for (const tool of availableTools) {
+    const server = tool.serverName;
+    const tools = byServer.get(server) ?? new Map<string, ToolInfo>();
+    tools.set(tool.name, tool);
+    byServer.set(server, tools);
+  }
+  return (server: string) => byServer.get(server) ?? byServer.get(`hela-${server}`);
+}
+
+export function checkToolAvailability(
+  toolChain: { serverName: string; toolName: string }[],
+  availableTools: ToolInfo[],
+): AvailabilityResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -20,15 +36,9 @@ export function checkToolAvailability(toolChain: any[], availableTools: any[]): 
     return { errors, warnings };
   }
 
-  const byServer = new Map<string, Set<string>>();
-  for (const tool of availableTools) {
-    const server = typeof tool.serverName === 'string' ? tool.serverName : 'unknown';
-    if (!byServer.has(server)) byServer.set(server, new Set());
-    byServer.get(server)!.add(tool.name);
-  }
-
+  const toolsForServer = indexToolsByServer(availableTools);
   for (const step of toolChain) {
-    const tools = byServer.get(step.serverName) ?? byServer.get(`hela-${step.serverName}`);
+    const tools = toolsForServer(step.serverName);
     if (!tools) {
       warnings.push(`Tool '${step.toolName}' could not be verified: server '${step.serverName}' was not discovered`);
       continue;

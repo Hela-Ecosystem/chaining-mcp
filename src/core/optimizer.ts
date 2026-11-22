@@ -1031,161 +1031,67 @@ export class SmartRouteOptimizer {
     return score;
   }
 
-  /**
-   * Get comprehensive tool chain analysis
-   */
-  getToolChainAnalysis(input: string): {
-    totalTools: number;
-    averageComplexity: number;
-    categoryDistribution: Record<string, number>;
-    routeRecommendations: RouteSuggestion[];
-    optimizationSuggestions: string[];
-  } {
-    const tools = Array.from(this.tools.values());
-    const totalTools = tools.length;
+  getToolChainAnalysis(input: string, availableTools = [...this.tools.values()]) {
+    const tools = availableTools.filter(tool => tool.discoverySource !== 'fallback');
+    const complexities = tools.flatMap(tool => tool.estimatedComplexity ?? []);
+    const averageComplexity = complexities.length > 0 && complexities.length === tools.length
+      ? Math.round(complexities.reduce((sum, value) => sum + value, 0) / complexities.length * 100) / 100
+      : null;
+    const categories = new Map<string, number>();
+    for (const tool of tools) {
+      categories.set(tool.serverName, (categories.get(tool.serverName) ?? 0) + 1);
+    }
 
-    // Calculate average complexity
-    const averageComplexity = tools.length > 0
-      ? tools.reduce((sum, tool) => sum + (tool.estimatedComplexity || 1), 0) / tools.length
-      : 0;
-
-    // Calculate category distribution
-    const categoryDistribution: Record<string, number> = {};
-    tools.forEach(tool => {
-      const category = tool.category || 'uncategorized';
-      categoryDistribution[category] = (categoryDistribution[category] || 0) + 1;
-    });
-
-    // Generate route recommendations based on input
-    const routeRecommendations = this.generateRouteRecommendations(input);
-
-    // Generate optimization suggestions
-    const optimizationSuggestions = this.generateOptimizationSuggestions(tools, averageComplexity);
+    const routeRecommendations = this.generateRouteRecommendations(input, tools);
+    const optimizationSuggestions: string[] = [];
+    if (averageComplexity !== null && averageComplexity > 4) {
+      optimizationSuggestions.push('Consider adding simpler utility tools to reduce overall complexity');
+    }
+    const slowTools = tools.filter(tool => tool.estimatedDuration !== undefined && tool.estimatedDuration > 3000);
+    if (slowTools.length) {
+      optimizationSuggestions.push(`Review ${slowTools.length} tools with catalog duration estimates above 3000 ms`);
+    }
 
     return {
-      totalTools,
-      averageComplexity: Math.round(averageComplexity * 100) / 100,
-      categoryDistribution,
+      totalTools: tools.length,
+      averageComplexity,
+      categoryDistribution: Object.fromEntries(categories),
       routeRecommendations,
+      routeReason: routeRecommendations.length
+        ? 'Each recommendation covers one catalog-matched operation. These matches cannot establish a complete chain, its data flow, or a confidence score.'
+        : 'No matching tools were found in the discovery registry for this input.',
       optimizationSuggestions,
     };
   }
 
-  /**
-   * Generate route recommendations based on input description
-   */
-  private generateRouteRecommendations(input: string): RouteSuggestion[] {
-    // Generate a few sample route recommendations based on input
-    const recommendations: RouteSuggestion[] = [];
-
-    if (input.toLowerCase().includes('file') || input.toLowerCase().includes('read') || input.toLowerCase().includes('write')) {
-      recommendations.push({
-        id: 'file-operations-route',
-        name: 'File Operations Route',
-        description: 'Optimized route for file operations using filesystem tools',
-        tools: [
-          {
-            name: 'read_file',
-            description: 'Read file contents',
-            inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
-            serverName: 'filesystem',
-            category: 'filesystem',
-            estimatedComplexity: 2,
-            estimatedDuration: 100,
-          },
-          {
-            name: 'write_file',
-            description: 'Write content to file',
-            inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
-            serverName: 'filesystem',
-            category: 'filesystem',
-            estimatedComplexity: 3,
-            estimatedDuration: 200,
-          }
-        ],
-        estimatedDuration: 300,
-        complexity: 2.5,
-        confidence: 0.85,
-        reasoning: 'File operations typically require read/write capabilities with proper error handling',
-      });
+  private generateRouteRecommendations(input: string, tools: ToolInfo[]) {
+    const operations = new Set<string>();
+    if (/\b(?:search (?:the )?web|web search|search online)\b/i.test(input)) operations.add('google_search');
+    if (/\bread (?:a |an |the )?(?:(?:local|text|input) )?files?\b/i.test(input)) operations.add('read_file');
+    if (/\b(?:save|write)(?: (?:a |an |the )?files?\b|[^.!?]*?\b(?:to|into|as) (?:a |an |the )?files?\b)/i.test(input)) {
+      operations.add('write_file');
     }
 
-    if (input.toLowerCase().includes('search') || input.toLowerCase().includes('web') || input.toLowerCase().includes('find')) {
-      recommendations.push({
-        id: 'web-search-route',
-        name: 'Web Search Route',
-        description: 'Optimized route for web search and information gathering',
-        tools: [
-          {
-            name: 'web_search',
-            description: 'Search the web for information',
-            inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
-            serverName: 'search',
-            category: 'web',
-            estimatedComplexity: 4,
-            estimatedDuration: 2000,
-          }
-        ],
-        estimatedDuration: 2000,
-        complexity: 4,
-        confidence: 0.75,
-        reasoning: 'Web search operations require robust querying and result processing capabilities',
-      });
-    }
+    const normalized = ` ${input.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    return tools.flatMap(tool => {
+      const toolName = tool.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const explicitMatch = toolName.includes(' ')
+        ? normalized.includes(` ${toolName} `)
+        : normalized.trim() === toolName;
+      if (!explicitMatch && !operations.has(tool.name)) return [];
 
-    // Add a general-purpose route
-    recommendations.push({
-      id: 'general-purpose-route',
-      name: 'General Purpose Route',
-      description: 'Balanced route suitable for most common tasks',
-      tools: [
-        {
-          name: 'analyze_tools',
-          description: 'Analyze available tools and capabilities',
-          inputSchema: {},
-          serverName: 'chaining',
-          category: 'analysis',
-          estimatedComplexity: 3,
-          estimatedDuration: 500,
-        }
-      ],
-      estimatedDuration: 500,
-      complexity: 3,
-      confidence: 0.9,
-      reasoning: 'General purpose route provides flexibility and can be adapted to various task types',
+      const qualifiedName = `${tool.serverName}/${tool.name}`;
+      return [{
+        id: qualifiedName,
+        name: qualifiedName,
+        description: tool.description,
+        tools: [tool],
+        estimatedDuration: tool.estimatedDuration ?? null,
+        complexity: tool.estimatedComplexity ?? null,
+        confidence: null,
+        reasoning: `The input matches ${qualifiedName} in the discovery registry.`,
+      }];
     });
-
-    return recommendations;
-  }
-
-  /**
-   * Generate optimization suggestions based on tool analysis
-   */
-  private generateOptimizationSuggestions(tools: ToolInfo[], averageComplexity: number): string[] {
-    const suggestions: string[] = [];
-
-    if (averageComplexity > 4) {
-      suggestions.push('Consider adding simpler utility tools to reduce overall complexity');
-    }
-
-    if (tools.length < 5) {
-      suggestions.push('Expand tool collection to provide more comprehensive coverage');
-    }
-
-    const categories = new Set(tools.map(t => t.category));
-    if (categories.size < 3) {
-      suggestions.push('Add tools from additional categories for better problem-solving coverage');
-    }
-
-    const slowTools = tools.filter(t => (t.estimatedDuration || 0) > 3000);
-    if (slowTools.length > 0) {
-      suggestions.push(`Consider optimizing or replacing ${slowTools.length} slow-performing tools`);
-    }
-
-    suggestions.push('Regularly update tool performance metrics based on actual usage patterns');
-    suggestions.push('Implement tool usage analytics to identify bottlenecks and optimization opportunities');
-
-    return suggestions;
   }
 }
 

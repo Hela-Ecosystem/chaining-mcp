@@ -1,4 +1,4 @@
-import { checkToolAvailability } from '../core/tool-availability.js';
+import { checkToolAvailability, indexToolsByServer } from '../core/tool-availability.js';
 import { spawn } from 'child_process';
 import { MCPServerDiscovery } from '../core/discovery.js';
 import { SmartRouteOptimizer } from '../core/optimizer.js';
@@ -14,7 +14,17 @@ import { sharedSkills } from '../skills/skill-discovery.js';
 import { MCP_SERVER_VERSION } from '../version.js';
 import { currentTimeTools } from '../agent/capability-graph.js';
 import { timeManagementTools } from '../tools/time-management-tools.js';
-import { WorkflowOrchestratorSchema } from '../types.js';
+import { ToolInfo, WorkflowOrchestratorSchema } from '../types.js';
+
+interface AnalysisStep {
+  id: string;
+  serverName: string;
+  toolName: string;
+  parameters: Record<string, unknown>;
+  dependsOn?: string[];
+  outputMapping?: Record<string, string>;
+  retryOnFailure?: boolean;
+}
 
 export class RequestHandlers {
   constructor(
@@ -286,12 +296,12 @@ export class RequestHandlers {
           total: servers.length,
         };
 
-      case 'analyze_tools':
+      case 'analyze_tools': {
         const tools = this.discovery.getTools();
         const filtered = args.serverName
           ? tools.filter(t => t.serverName === args.serverName)
           : args.category
-            ? tools.filter(t => t.category === args.category)
+            ? tools.filter(t => t.serverName === args.category)
             : tools;
 
         return {
@@ -299,12 +309,13 @@ export class RequestHandlers {
             name: t.name,
             description: t.description,
             server: t.serverName,
-            category: t.category,
-            complexity: t.estimatedComplexity || 1,
+            category: t.serverName,
+            complexity: t.discoverySource === 'fallback' ? null : t.estimatedComplexity ?? null,
           })),
           total: filtered.length,
-          categories: [...new Set(filtered.map(t => t.category))],
+          categories: [...new Set(filtered.map(t => t.serverName))],
         };
+      }
 
       case 'generate_route_suggestions': {
         // M7: heuristic route ranking removed — suggestions come from the
@@ -387,8 +398,7 @@ export class RequestHandlers {
       }
 
       case 'get_tool_chain_analysis':
-        const toolChainAnalysis = this.optimizer.getToolChainAnalysis(args.input || '');
-        return toolChainAnalysis;
+        return this.optimizer.getToolChainAnalysis(String(args.input ?? ''), this.discovery.getTools());
 
       case 'sequentialthinking': {
         // Needle-backed sequential thinking: a thought becomes one
@@ -603,34 +613,32 @@ export class RequestHandlers {
     return null;
   }
 
-  private normalizeToolChain(toolChain: any[]): any[] {
+  private normalizeToolChain(toolChain: any[], availableTools: ToolInfo[]): AnalysisStep[] {
     if (!Array.isArray(toolChain)) return [];
-    const availableTools = this.discovery.getTools();
     return toolChain.map((step, index) => {
       if (typeof step === 'string') {
         const found = availableTools.find(t => t.name === step);
         return {
           id: `step_${index + 1}`,
-          serverName: found ? (found as any).serverName || 'core' : 'core',
+          serverName: found?.serverName ?? 'core',
           toolName: step,
           parameters: {},
         };
       }
-      const toolName = step.toolName || step.name || `tool_${index + 1}`;
-      const found = availableTools.find(t => t.name === toolName);
+      const toolName = step?.toolName || step?.name || `tool_${index + 1}`;
       return {
         ...step,
-        id: step.id || `step_${index + 1}`,
-        serverName: step.serverName || (found ? (found as any).serverName || 'core' : 'core'),
+        id: step?.id || `step_${index + 1}`,
+        serverName: step?.serverName || availableTools.find(t => t.name === toolName)?.serverName || 'core',
         toolName,
-        parameters: step.parameters || {},
+        parameters: step?.parameters || {},
       };
     });
   }
 
   private validateToolChain(
     rawToolChain: any[],
-    availableTools: any[],
+    availableTools: ToolInfo[],
     options: {
       checkCircularDependencies?: boolean;
       checkToolAvailability?: boolean;
@@ -653,7 +661,7 @@ export class RequestHandlers {
       };
     }
 
-    const toolChain = this.normalizeToolChain(rawToolChain);
+    const toolChain = this.normalizeToolChain(rawToolChain, availableTools);
 
     // Check circular dependencies if requested
     if (options.checkCircularDependencies !== false) {
@@ -1192,10 +1200,11 @@ export class RequestHandlers {
         const availableTools = this.discovery.getTools();
         return this.validateToolChain(toolChain, availableTools, args);
 
-      case 'analyze_tool_chain_performance':
-        const rawChain = args.toolChain || [];
-        const normalizedChain = this.normalizeToolChain(rawChain);
-        return this.analyzeToolChainPerformance(normalizedChain, args);
+      case 'analyze_tool_chain_performance': {
+        const tools = this.discovery.getTools();
+        const toolChain = this.normalizeToolChain(args.toolChain, tools);
+        return this.analyzeToolChainPerformance(toolChain, tools, args);
+      }
 
       default:
         throw new Error(`Unknown validation/analysis tool: ${name}`);
@@ -1203,218 +1212,128 @@ export class RequestHandlers {
   }
 
   private analyzeToolChainPerformance(
-    toolChain: any[],
+    toolChain: AnalysisStep[],
+    tools: ToolInfo[],
     options: {
       includeExecutionMetrics?: boolean;
       includeComplexityAnalysis?: boolean;
       includeOptimizationSuggestions?: boolean;
-    } = {}
-  ): {
-    metrics: {
-      totalEstimatedDuration: number;
-      averageComplexity: number;
-      bottleneckSteps: string[];
-      parallelizationPotential: number;
-    };
-    complexity: {
-      overallComplexity: number;
-      complexityDistribution: Record<string, number>;
-      riskFactors: string[];
-    };
-    suggestions: string[];
-  } {
-    const opts = {
-      includeExecutionMetrics: options.includeExecutionMetrics !== false,
-      includeComplexityAnalysis: options.includeComplexityAnalysis !== false,
-      includeOptimizationSuggestions: options.includeOptimizationSuggestions !== false,
-    };
+    },
+  ) {
+    const executionEnabled = options.includeExecutionMetrics !== false;
+    const complexityEnabled = options.includeComplexityAnalysis !== false;
+    const availability = checkToolAvailability(toolChain, tools);
+    const riskFactors = [...availability.errors, ...availability.warnings];
+    const toolsForServer = indexToolsByServer(tools);
+    const steps = toolChain.map(step => {
+      const tool = toolsForServer(step.serverName)?.get(step.toolName);
+      const metadata = tool?.discoverySource === 'fallback' ? undefined : tool;
+      return { id: step.id, duration: metadata?.estimatedDuration, complexity: metadata?.estimatedComplexity };
+    });
 
-    const metrics = this.calculateExecutionMetrics(toolChain, opts);
-    const complexity = this.analyzeComplexityMetrics(toolChain, opts);
-    const suggestions = this.generateOptimizationSuggestions(toolChain, metrics, complexity, opts);
+    const durations = steps.flatMap(step => step.duration ?? []);
+    const serialDuration = durations.length === steps.length && durations.length
+      ? durations.reduce((sum, duration) => sum + duration, 0)
+      : null;
+    const totalEstimatedDuration = executionEnabled && Number.isFinite(serialDuration) ? serialDuration : null;
+    let bottleneckSteps: string[] = [];
+    if (totalEstimatedDuration !== null) {
+      const slowest = durations.reduce((max, duration) => Math.max(max, duration), 0);
+      if (durations.some(duration => duration < slowest)) {
+        bottleneckSteps = steps.filter(step => step.duration === slowest).map(step => step.id);
+      }
+    }
+
+    const complexities = steps.flatMap(step => step.complexity ?? []);
+    const averageComplexity = complexities.length === steps.length && complexities.length
+      ? complexities.reduce((sum, value) => sum + value, 0) / complexities.length
+      : null;
+    const complexityDistribution: Record<string, number> = {};
+    if (complexityEnabled) {
+      for (const { complexity } of steps) {
+        const level = complexity === undefined ? 'unavailable' : complexity <= 2 ? 'low' : complexity <= 4 ? 'medium' : 'high';
+        complexityDistribution[level] = (complexityDistribution[level] ?? 0) + 1;
+      }
+      if (toolChain.filter(step => step.retryOnFailure).length > toolChain.length * 0.3) {
+        riskFactors.push('High number of steps with retry logic may impact performance');
+      }
+    }
+
+    const parallelizationPotential = executionEnabled ? this.calculateParallelizationPotential(toolChain) : null;
+    if (executionEnabled && parallelizationPotential === null && toolChain.length) {
+      riskFactors.push('Parallelization is unavailable because step dependencies are invalid or cyclic');
+    }
+
+    const suggestions: string[] = [];
+    if (options.includeOptimizationSuggestions !== false) {
+      if (bottleneckSteps.length) {
+        suggestions.push(`Review the steps with the highest catalog duration estimates: ${bottleneckSteps.join(', ')}`);
+      }
+      if (complexityEnabled && averageComplexity !== null && averageComplexity > 4) {
+        suggestions.push('Consider replacing high-complexity steps with simpler alternatives');
+      }
+      if (parallelizationPotential !== null && parallelizationPotential > 0.5) {
+        suggestions.push('Consider running independent steps in parallel');
+      }
+    }
 
     return {
-      metrics,
-      complexity,
+      metrics: {
+        totalEstimatedDuration,
+        averageComplexity: executionEnabled ? averageComplexity : null,
+        bottleneckSteps,
+        parallelizationPotential,
+      },
+      complexity: {
+        overallComplexity: complexityEnabled ? averageComplexity : null,
+        complexityDistribution,
+        riskFactors,
+      },
       suggestions,
     };
   }
 
-  private calculateExecutionMetrics(
-    toolChain: any[],
-    options: any
-  ): {
-    totalEstimatedDuration: number;
-    averageComplexity: number;
-    bottleneckSteps: string[];
-    parallelizationPotential: number;
-  } {
-    if (options.includeExecutionMetrics === false || toolChain.length === 0) {
-      return {
-        totalEstimatedDuration: 0,
-        averageComplexity: 0,
-        bottleneckSteps: [],
-        parallelizationPotential: 0,
-      };
-    }
+  private calculateParallelizationPotential(toolChain: AnalysisStep[]): number | null {
+    if (!toolChain.length) return null;
+    const successors = new Map(toolChain.map(step => [step.id, [] as string[]]));
+    if (successors.size !== toolChain.length) return null;
 
-    let totalDuration = 0;
-    let totalComplexity = 0;
-    const stepDurations: Array<{ id: string; duration: number }> = [];
-    const stepComplexities: Array<{ id: string; complexity: number }> = [];
-
-    toolChain.forEach(step => {
-      const duration = step.estimatedDuration || step.duration || 1000;
-      const complexity = step.estimatedComplexity || step.complexity || 3;
-
-      totalDuration += duration;
-      totalComplexity += complexity;
-
-      stepDurations.push({ id: step.id, duration });
-      stepComplexities.push({ id: step.id, complexity });
-    });
-
-    // Identify bottleneck steps (top 20% slowest)
-    const sortedByDuration = [...stepDurations].sort((a, b) => b.duration - a.duration);
-    const bottleneckCount = Math.max(1, Math.ceil(sortedByDuration.length * 0.2));
-    const bottleneckSteps = sortedByDuration.slice(0, bottleneckCount).map(s => s.id);
-
-    // Calculate parallelization potential (steps that don't depend on each other)
-    const parallelizationPotential = this.calculateParallelizationPotential(toolChain);
-
-    return {
-      totalEstimatedDuration: totalDuration,
-      averageComplexity: totalComplexity / toolChain.length,
-      bottleneckSteps,
-      parallelizationPotential,
-    };
-  }
-
-  private analyzeComplexityMetrics(
-    toolChain: any[],
-    options: any
-  ): {
-    overallComplexity: number;
-    complexityDistribution: Record<string, number>;
-    riskFactors: string[];
-  } {
-    if (options.includeComplexityAnalysis === false || toolChain.length === 0) {
-      return {
-        overallComplexity: 0,
-        complexityDistribution: {},
-        riskFactors: [],
-      };
-    }
-
-    const complexities = toolChain.map(step => step.estimatedComplexity || step.complexity || 3);
-    const overallComplexity = complexities.reduce((sum, c) => sum + c, 0) / complexities.length;
-
-    // Calculate complexity distribution
-    const complexityDistribution: Record<string, number> = {};
-    complexities.forEach(complexity => {
-      const level = complexity <= 2 ? 'low' : complexity <= 4 ? 'medium' : 'high';
-      complexityDistribution[level] = (complexityDistribution[level] || 0) + 1;
-    });
-
-    // Identify risk factors
-    const riskFactors: string[] = [];
-    if (overallComplexity > 4) {
-      riskFactors.push('High overall complexity may lead to execution failures');
-    }
-
-    const highComplexitySteps = toolChain.filter(step =>
-      (step.estimatedComplexity || step.complexity || 3) >= 5
-    );
-    if (highComplexitySteps.length > 0) {
-      riskFactors.push(`${highComplexitySteps.length} steps have high complexity and may be error-prone`);
-    }
-
-    const stepsWithRetries = toolChain.filter(step => step.retryOnFailure);
-    if (stepsWithRetries.length > toolChain.length * 0.3) {
-      riskFactors.push('High number of steps with retry logic may impact performance');
-    }
-
-    return {
-      overallComplexity,
-      complexityDistribution,
-      riskFactors,
-    };
-  }
-
-  private generateOptimizationSuggestions(
-    toolChain: any[],
-    metrics: any,
-    complexity: any,
-    options: any
-  ): string[] {
-    if (!options.includeOptimizationSuggestions) {
-      return [];
-    }
-
-    const suggestions: string[] = [];
-
-    // Duration-based suggestions
-    if (metrics.bottleneckSteps.length > 0) {
-      suggestions.push(`Optimize bottleneck steps: ${metrics.bottleneckSteps.join(', ')}`);
-    }
-
-    if (metrics.totalEstimatedDuration > 10000) {
-      suggestions.push('Consider breaking down the tool chain into smaller, parallel workflows');
-    }
-
-    // Complexity-based suggestions
-    if (complexity.overallComplexity > 4) {
-      suggestions.push('Consider replacing high-complexity steps with simpler alternatives');
-    }
-
-    if (complexity.complexityDistribution.high > toolChain.length * 0.5) {
-      suggestions.push('High proportion of complex steps - consider simplifying the workflow');
-    }
-
-    // Parallelization suggestions
-    if (metrics.parallelizationPotential > 0.5) {
-      suggestions.push(`High parallelization potential (${Math.round(metrics.parallelizationPotential * 100)}%) - consider running independent steps in parallel`);
-    }
-
-    // Dependency optimization
-    const stepsWithMultipleDeps = toolChain.filter(step =>
-      step.dependsOn && step.dependsOn.length > 2
-    );
-    if (stepsWithMultipleDeps.length > 0) {
-      suggestions.push('Consider reducing dependency chains to improve execution flow');
-    }
-
-    // General suggestions
-    suggestions.push('Monitor execution times and adjust duration estimates based on real performance');
-    suggestions.push('Consider implementing circuit breakers for frequently failing steps');
-    suggestions.push('Add timeout configurations for long-running operations');
-
-    return suggestions;
-  }
-
-  private calculateParallelizationPotential(toolChain: any[]): number {
-    if (toolChain.length <= 1) return 0;
-
-    // Build dependency graph
-    const dependencyMap: Record<string, string[]> = {};
-    toolChain.forEach(step => {
-      dependencyMap[step.id] = step.dependsOn || [];
-    });
-
-    // Calculate maximum parallelization
-    // This is a simplified calculation - in practice, you'd need more sophisticated analysis
-    let independentSteps = 0;
-    const processed = new Set<string>();
-
-    // Count steps that can run in parallel (no dependencies or dependencies already processed)
-    toolChain.forEach(step => {
-      const deps = dependencyMap[step.id];
-      if (deps.length === 0 || deps.every((dep: string) => processed.has(dep))) {
-        independentSteps++;
-        processed.add(step.id);
+    const remaining = new Map<string, number>();
+    let ready: string[] = [];
+    for (const [index, step] of toolChain.entries()) {
+      if (step.dependsOn !== undefined && !Array.isArray(step.dependsOn)) return null;
+      const dependencies = new Set(step.dependsOn ?? (index ? [toolChain[index - 1].id] : []));
+      for (const mapping of Object.values(step.outputMapping ?? {})) {
+        if (typeof mapping !== 'string') return null;
+        dependencies.add(mapping.split('.')[0]);
       }
-    });
+      for (const dependency of dependencies) {
+        const dependents = successors.get(dependency);
+        if (!dependents) return null;
+        dependents.push(step.id);
+      }
+      remaining.set(step.id, dependencies.size);
+      if (!dependencies.size) ready.push(step.id);
+    }
 
-    return independentSteps / toolChain.length;
+    let processed = 0;
+    let depth = 0;
+    while (ready.length) {
+      const next: string[] = [];
+      for (const id of ready) {
+        processed++;
+        for (const dependent of successors.get(id)!) {
+          const count = remaining.get(dependent)! - 1;
+          remaining.set(dependent, count);
+          if (count === 0) next.push(dependent);
+        }
+      }
+      ready = next;
+      depth++;
+    }
+
+    if (processed !== toolChain.length) return null;
+    // Normalize the scheduling depth between a serial chain and a fully independent chain.
+    return toolChain.length === 1 ? 0 : (toolChain.length - depth) / (toolChain.length - 1);
   }
 }

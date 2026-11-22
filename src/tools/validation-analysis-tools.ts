@@ -30,7 +30,7 @@ export const validationAnalysisTools: Tool[] = [
   },
   {
     name: 'analyze_tool_chain_performance',
-    description: 'Analyze performance metrics and efficiency of tool chains. Provides execution time estimates, complexity analysis, and optimization suggestions',
+    description: 'Check tool availability and analyze dependencies. Duration and complexity are catalog estimates, returned as null when unavailable.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,13 +40,24 @@ export const validationAnalysisTools: Tool[] = [
           items: {
             type: 'object',
             properties: {
+              id: { type: 'string', description: 'Step ID, defaults to step_1, step_2, and so on' },
               serverName: { type: 'string', description: 'Name of the MCP server' },
               toolName: { type: 'string', description: 'Name of the tool' },
               parameters: { type: 'object', description: 'Parameters for the tool' },
+              dependsOn: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Prerequisite step IDs. Omit to depend on the preceding step, or pass [] to declare no explicit prerequisites.',
+              },
+              outputMapping: {
+                type: 'object',
+                additionalProperties: { type: 'string' },
+                description: 'Map parameters to previous outputs using stepId.outputKey. Each reference adds a dependency.',
+              },
             },
           },
         },
-        includeExecutionMetrics: { type: 'boolean', default: true, description: 'Whether to include execution time estimates' },
+        includeExecutionMetrics: { type: 'boolean', default: true, description: 'Include estimated serial duration and dependency-based parallelization potential' },
         includeComplexityAnalysis: { type: 'boolean', default: true, description: 'Whether to analyze complexity metrics' },
         includeOptimizationSuggestions: { type: 'boolean', default: true, description: 'Whether to provide optimization suggestions' },
       },

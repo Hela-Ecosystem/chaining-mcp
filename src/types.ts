@@ -22,6 +22,7 @@ export const ToolInfoSchema = z.object({
   inputSchema: z.record(z.string(), z.any()),
   serverName: z.string(),
   category: z.string().optional(),
+  discoverySource: z.literal('fallback').optional(),
   dependencies: z.array(z.string()).optional(),
   estimatedComplexity: z.number().min(1).max(10).optional(),
   estimatedDuration: z.number().optional(), // in milliseconds

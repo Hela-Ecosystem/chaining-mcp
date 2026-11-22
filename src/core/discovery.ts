@@ -7,6 +7,16 @@ import { MCPServerInfo, ToolInfo, MCPServerInfoSchema } from '../types.js';
 import { ConfigLoader } from '../config/config-loader.js';
 import { DiscoveryConfig, EssentialServerConfig, FallbackToolConfig } from '../config/discovery-config.js';
 
+function catalogEstimates(tool: { estimatedComplexity?: unknown; estimatedDuration?: unknown }) {
+  const { estimatedComplexity, estimatedDuration } = tool;
+  return {
+    ...(typeof estimatedComplexity === 'number' && estimatedComplexity >= 1 && estimatedComplexity <= 10
+      ? { estimatedComplexity } : {}),
+    ...(typeof estimatedDuration === 'number' && Number.isFinite(estimatedDuration) && estimatedDuration >= 0
+      ? { estimatedDuration } : {}),
+  };
+}
+
 export class MCPServerDiscovery {
   private servers: Map<string, MCPServerInfo> = new Map();
   private tools: Map<string, ToolInfo> = new Map();
@@ -87,7 +97,8 @@ export class MCPServerDiscovery {
             description: typeof tool.description === 'string' ? tool.description : '',
             inputSchema: tool.inputSchema ?? { type: 'object', properties: {} },
             serverName: id,
-            category: 'hela-runtime',
+            category: id,
+            ...catalogEstimates(tool),
           });
         }
       }
@@ -147,7 +158,9 @@ export class MCPServerDiscovery {
       }
     }
     for (const tool of catalog.tools) {
-      if (!this.tools.has(tool.name)) this.tools.set(tool.name, tool);
+      if (!this.tools.has(tool.name) || this.tools.get(tool.name)?.discoverySource === 'fallback') {
+        this.tools.set(tool.name, tool);
+      }
     }
 
     // Store discovered servers
@@ -283,7 +296,11 @@ export class MCPServerDiscovery {
 
     // Store tools
     for (const tool of tools) {
-      this.tools.set(tool.name, tool);
+      const existing = this.tools.get(tool.name);
+      if (tool.discoverySource === 'fallback' && existing && existing.discoverySource !== 'fallback') continue;
+      this.tools.set(tool.name, existing?.serverName === tool.serverName && existing.discoverySource !== 'fallback'
+        ? { ...catalogEstimates(existing), ...tool }
+        : tool);
     }
     this.lastAnalyzeTime = Date.now();
 
@@ -399,8 +416,7 @@ export class MCPServerDiscovery {
               inputSchema: tool.inputSchema || {},
               serverName,
               category: this.inferCategory(tool.name, tool.description),
-              estimatedComplexity: this.estimateComplexity(tool.name, tool.description),
-              estimatedDuration: this.estimateDuration(tool.name, tool.description),
+              ...catalogEstimates(tool),
             });
           }
         }
@@ -431,6 +447,7 @@ export class MCPServerDiscovery {
             inputSchema: toolDef.inputSchema,
             serverName,
             category: toolDef.category,
+            discoverySource: 'fallback',
             estimatedComplexity: toolDef.estimatedComplexity,
             estimatedDuration: toolDef.estimatedDuration,
           });
@@ -455,38 +472,6 @@ export class MCPServerDiscovery {
     }
 
     return 'utility'; // Default category
-  }
-
-  /**
-   * Estimate tool complexity using configuration rules
-   */
-  private estimateComplexity(name: string, description?: string): number {
-    const text = `${name} ${description || ''}`.toLowerCase();
-
-    // Check against configured complexity rules
-    for (const rule of this.config.complexityRules) {
-      if (text.includes(rule.pattern)) {
-        return rule.complexity;
-      }
-    }
-
-    return 3; // Default complexity
-  }
-
-  /**
-   * Estimate tool duration using configuration rules
-   */
-  private estimateDuration(name: string, description?: string): number {
-    const text = `${name} ${description || ''}`.toLowerCase();
-
-    // Check against configured duration rules
-    for (const rule of this.config.durationRules) {
-      if (text.includes(rule.pattern)) {
-        return rule.duration;
-      }
-    }
-
-    return 500; // Default duration
   }
 
   /**

@@ -11,12 +11,12 @@ export const coreChainingTools: Tool[] = [
   },
   {
     name: 'analyze_tools',
-    description: 'Analyzes available tools from discovered MCP servers',
+    description: 'Lists discovered tools by server (category). Complexity is a catalog estimate or null when unavailable.',
     inputSchema: {
       type: 'object',
       properties: {
         serverName: { type: 'string', description: 'Filter by specific server name' },
-        category: { type: 'string', description: 'Filter by tool category' },
+        category: { type: 'string', description: 'Filter by cell or server name' },
       },
     },
   },
@@ -62,7 +62,7 @@ export const coreChainingTools: Tool[] = [
   },
   {
     name: 'get_tool_chain_analysis',
-    description: 'Gets comprehensive analysis of available tools and suggested routes',
+    description: 'Summarizes discovered tools and recommends catalog matches for individual operations in the input.',
     inputSchema: {
       type: 'object',
       properties: {
