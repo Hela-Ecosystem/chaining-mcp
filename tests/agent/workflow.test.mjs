@@ -140,7 +140,7 @@ describe('planToWorkflow + runAgentWorkflow', () => {
         primary: needleQueue([
           native('alpha', { q: 0 }),
           native('alpha', { q: 1 }),
-          native('alpha', { q: 1 }),
+          done('finished'),
         ]),
         escalation: scriptProvider([done('unreached')]),
       },
@@ -156,7 +156,7 @@ describe('planToWorkflow + runAgentWorkflow', () => {
     o.setTransport(okTransport((tool) => ({ tool })));
     const native = (name, args) => JSON.stringify({ type: 'call', function_calls: [{ name, arguments: args }], confidence: 0.9 });
     let i = 0;
-    const queue = [native('alpha', {}), native('ghost', {}), native('alpha', {}), native('alpha', {})];
+    const queue = [native('alpha', {}), native('ghost', {}), native('alpha', {}), done('finished')];
     const { run } = await runAgentWorkflow({
       task: 't', toolSchemas: [{ name: 'alpha' }],
       orchestrator: o,
@@ -169,5 +169,63 @@ describe('planToWorkflow + runAgentWorkflow', () => {
       },
     });
     assert.equal(run.decision.action, 'complete');
+  });
+
+  test('scopes the clock catalog for both planning and execution', async () => {
+    const o = new WorkflowOrchestrator();
+    const seen = [];
+    const clock = 'hela_mitosis_get_current_time';
+    const args = { timezone: 'Asia/Jakarta' };
+    const catalogs = [];
+    o.setTransport(okTransport((tool, params) => {
+      seen.push([tool, params]);
+      return { datetime: '07:00 WIB' };
+    }));
+    const primary = scriptProvider([
+      JSON.stringify({ type: 'call', function_calls: [{ name: clock, arguments: args }] }),
+      call('hela_membrane_read_file'),
+      call(clock, args),
+      done('07:00 WIB'),
+    ]);
+    const generate = primary.generate;
+    primary.generate = request => {
+      catalogs.push(request.tools.map(tool => tool.name));
+      return generate(request);
+    };
+    const { plan, run } = await runAgentWorkflow({
+      task: 'Tell me the current time in Asia/Jakarta. Do not modify any files.',
+      toolSchemas: [{ name: 'hela_membrane_read_file' }, { name: clock }, { name: 'hela_membrane_write_file' }],
+      orchestrator: o,
+      providers: { primary },
+    });
+    assert.deepEqual(plan.steps.map(step => step.tool), [clock]);
+    assert.deepEqual(seen, [[clock, args]]);
+    assert.deepEqual(catalogs, [[clock], [clock], [clock], [clock]]);
+    assert.equal(run.decision.result, '07:00 WIB');
+  });
+
+  test('persists a returned error and an unsuccessful run when the loop runs out of iterations', async (t) => {
+    const o = new WorkflowOrchestrator();
+    const payload = { success: false, message: 'bad path' };
+    o.setTransport(okTransport(() => payload));
+    const attach = t.mock.method(o, 'attachRunStore');
+    const execute = t.mock.method(o, 'executeTool');
+    const native = JSON.stringify({ type: 'call', function_calls: [{ name: 'alpha', arguments: {} }] });
+    await assert.rejects(runAgentWorkflow({
+      task: 'do alpha', toolSchemas: [{ name: 'alpha' }],
+      orchestrator: o,
+      providers: { primary: scriptProvider([native, call('alpha')]) },
+      limits: { maxIterations: 1 },
+    }), /iteration limit/);
+    const store = attach.mock.calls[0].arguments[0];
+    t.after(() => store.close());
+    const { run_id: runId, step_id: stepId } = execute.mock.calls[0].arguments[2].run;
+    const { run, events } = store.getRun(runId);
+    assert.equal(run.status, 'failed');
+    assert.equal(events.at(-1).kind, 'agent_end');
+    const step = store.getStep(runId, stepId);
+    assert.equal(step.status, 'failed');
+    assert.equal(step.result_summary, 'bad path');
+    assert.deepEqual(JSON.parse(step.result), payload);
   });
 });

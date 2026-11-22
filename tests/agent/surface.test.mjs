@@ -4,6 +4,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RequestHandlers } from './.dist/handlers/request-handlers.js';
 import { WorkflowOrchestrator } from './.dist/managers/workflow-orchestrator.js';
+import { NeedleProvider } from './.dist/agent/needle-provider.js';
+import { TimeManager } from './.dist/managers/time-manager.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'skills');
 
@@ -61,6 +63,40 @@ describe('M8 handler surface', () => {
     assert.equal(r.ok, false);
     assert.match(r.error, /disabled/);
     delete process.env.MITOSIS_AGENT_ENABLED;
+  });
+
+  test('agent_run can use its local clock when discovery lists only unrelated tools', async (t) => {
+    const enabled = process.env.MITOSIS_AGENT_ENABLED;
+    process.env.MITOSIS_AGENT_ENABLED = 'true';
+    t.after(() => {
+      if (enabled === undefined) delete process.env.MITOSIS_AGENT_ENABLED;
+      else process.env.MITOSIS_AGENT_ENABLED = enabled;
+    });
+    const timezone = 'Asia/Jakarta';
+    const call = { name: 'get_current_time', arguments: { timezone } };
+    const replies = [
+      { type: 'call', function_calls: [call] },
+      { action: 'call_tool', tool: call.name, args: call.arguments },
+      { action: 'complete', result: timezone },
+    ];
+    t.mock.method(NeedleProvider.prototype, 'health', async () => ({ ok: true }));
+    t.mock.method(NeedleProvider.prototype, 'generate', async request => {
+      assert.deepEqual(request.tools.map(tool => tool.name), [call.name]);
+      return { text: JSON.stringify(replies.shift()), modelUsed: 'mock', latencyMs: 1 };
+    });
+    const o = new WorkflowOrchestrator();
+    const h = new RequestHandlers({ getTools: () => fakeTools }, {}, new TimeManager(), {}, {}, o);
+    const executed = [];
+    o.setTransport(async (_server, tool, args) => {
+      const result = await h.handleToolCall(tool, args);
+      executed.push([tool, result.timezone]);
+      return result;
+    });
+    const run = await h.handleToolCall('agent_run', { task: 'Tell me the current time in Asia/Jakarta. Do not modify any files.' });
+    assert.equal(run.ok, true);
+    assert.equal(run.decision.action, 'complete');
+    assert.equal(run.iterations, 2);
+    assert.deepEqual(executed, [[call.name, timezone]]);
   });
 
   test('brainstorming keyless fails honestly (no template ideas)', async () => {

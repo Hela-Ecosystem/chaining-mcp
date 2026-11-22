@@ -32,16 +32,16 @@ describe('replanning and multi-observation', () => {
     assert.equal(run.iterations, 3);
   });
 
-  test('saturation across three turns completes with last result', async () => {
+  test('a skipped duplicate leaves room for the next tool decision', async () => {
     let n = 0;
     const run = await agentRun({
       task: 't', toolSchemas: TOOLS,
       executor: { executeTool: async () => ({ page: ++n }) },
-      providers: { primary: scriptProvider([call('fetch', { p: 1 }), call('fetch', { p: 1 }), call('fetch', { p: 1 })]) },
+      providers: { primary: scriptProvider([call('fetch', { p: 1 }), call('fetch', { p: 1 }), call('fetch', { p: 2 }), done({ page: 2 })]) },
       limits,
     });
-    assert.equal(n, 1);
-    assert.deepEqual(run.decision.result, { page: 1 });
+    assert.equal(n, 2);
+    assert.deepEqual(run.decision.result, { page: 2 });
   });
 
   test('parallel plan steps share no dependencies and run together', async () => {

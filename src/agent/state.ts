@@ -78,7 +78,7 @@ export class AgentStateManager {
     return s.events.slice(-n).map(e => {
       switch (e.kind) {
         case 'tool_call': return `call ${e.tool}(${JSON.stringify(e.args).slice(0, 100)})`;
-        case 'tool_result': return e.error ? `${e.tool} ERROR ${String(e.error).slice(0, 100)}` : `${e.tool} ok ${JSON.stringify(e.result).slice(0, 100)}`;
+        case 'tool_result': return e.error ? `${e.tool} ERROR ${e.error.slice(0, 100)}` : `${e.tool} ok ${(JSON.stringify(e.result) ?? String(e.result)).slice(0, 100)}`;
         case 'decision': return `decision ${JSON.stringify(e.decision).slice(0, 120)}`;
         case 'escalation': return `escalated: ${e.reason.slice(0, 120)}`;
         case 'revision': return `revised: ${e.note.slice(0, 120)}`;

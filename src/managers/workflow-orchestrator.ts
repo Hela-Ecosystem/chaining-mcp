@@ -3,6 +3,7 @@ import { WorkflowStep, WorkflowOrchestratorInput } from '../types.js';
 import { checkCapability, resolveProfile, type HelaCapabilityContract, type HelaInvocationMeta } from '../agent/capability-policy.js';
 import type { RunStore } from '../agent/run-store.js';
 import { wrapHelaResult } from '../agent/hela-result.js';
+import { toolResultError } from '../agent/execution-result.js';
 
 export interface WorkflowRunOptions {
   /** Durable store for step records; enables resume after restart. */
@@ -107,7 +108,8 @@ export class WorkflowOrchestrator {
       if (store && runId && stepId) {
         // RunStore keeps the RAW payload so resume restores raw results.
         store.saveStepResult(runId, stepId, result);
-        store.finishStep(runId, stepId, 'completed', 'ok');
+        const error = toolResultError(result);
+        store.finishStep(runId, stepId, error ? 'failed' : 'completed', error ?? 'ok');
       }
       // P1-C1: opt-in canonical envelope; default raw path unchanged.
       if (opts.envelope) {

@@ -143,6 +143,17 @@ export const CAPABILITY_TRANSITIONS: Record<string, string[]> = {
 
 export interface ToolDecl { name: string; description?: string; schema?: unknown; server?: string }
 
+/** Restrict standalone clock queries to clock tools, including runtime aliases. */
+export function currentTimeTools<T extends ToolDecl>(tools: T[], task: string): T[] | undefined {
+  const request = task.trim().replace(
+    /[.!?;]\s*(?:do not|don['’]t|never)\s+(?:modify|change|write|edit|create|delete)\s+(?:to\s+)?(?:any\s+)?(?:the\s+)?files?[.!?]*$/i,
+    '',
+  );
+  const clockQuery = /^(?:please\s+)?(?:(?:(?:tell|show|give)\s+me|what(?:\s+is|['’]s)|get|check)\s+)?(?:the\s+)?(?:(?:current(?:\s+local)?|local)\s+time|what\s+time\s+is\s+it)(?:\s+(?:right\s+)?now)?(?:\s+in\s+([\p{L}\p{N}_+ /-]+))?[.!?]*$/iu.exec(request);
+  if (!clockQuery || /\b(?:and|then|from|using|by|but|with|without|file|files)\b/i.test(clockQuery[1] ?? '')) return undefined;
+  return tools.filter(tool => /(?:^|_)get_current_time$/.test(tool.name));
+}
+
 /**
  * Phase 2 (v1.2.0): canonical responsibility boundaries for overlapping tools.
  * The canonical tool is preferred whenever both sides of an overlap are in

@@ -56,6 +56,20 @@ describe('agentStep', () => {
     assert.equal(m.stats(s.sessionId).toolCalls, 1);
   });
 
+  test('execute=true records a returned error as a failed result', async () => {
+    const payload = { success: false, message: 'bad path' };
+    const step = await agentStep({
+      task: 't', tools: TOOLS, execute: true,
+      executor: { executeTool: async () => payload },
+      providers: { primary: scriptProvider([call('alpha')]) },
+      state: new AgentStateManager(),
+    });
+    assert.deepEqual(step.result, payload);
+    assert.equal(step.error, 'bad path');
+    assert.equal(step.stats.errors, 1);
+    assert.match(step.tail.at(-1), /alpha ERROR bad path/);
+  });
+
   test('unknown tool rejected without throwing', async () => {
     const m = new AgentStateManager();
     const s = await agentStep({

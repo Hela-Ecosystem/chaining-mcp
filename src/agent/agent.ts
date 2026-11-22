@@ -1,12 +1,13 @@
 import { AgentDecisionSchema, AgentPlanSchema, type AgentDecision, type AgentPlan, type ModelProvider, type ModelRequest } from './schemas.js';
 import { NeedleProvider } from './needle-provider.js';
-import { scopeToolsForTask } from './capability-graph.js';
+import { currentTimeTools, scopeToolsForTask } from './capability-graph.js';
 import { recallEpisodicMemory, retainWorkflowDecision } from './episodic-retention.js';
 import { OpenRouterProvider } from './openrouter-provider.js';
 import type { AgentStateManager, TerminationReason } from './state.js';
 import { sharedAgentState } from './state.js';
 import { EscalationController, escalationPolicyFromEnv, type EscalationPolicy, type EscalationRecord, type EscalationTrigger } from './escalation.js';
 import { escalationProviderAvailable } from './diagnostics.js';
+import { toolResultError } from './execution-result.js';
 
 export interface AgentLoopLimits { maxIterations: number; maxToolCalls: number; maxExecutionMs: number }
 export interface AgentToolExecutor { executeTool(tool: string, args: unknown, signal?: AbortSignal): Promise<unknown> }
@@ -43,7 +44,7 @@ class HandoffSignal extends Error {
 }
 
 function compact(value: unknown, max = 160): string {
-  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  const s = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
@@ -86,16 +87,22 @@ export function parseDecision(rawText: string): AgentDecision {
   return AgentDecisionSchema.parse(JSON.parse(cleaned));
 }
 
-function buildObservation(task: string, tools: AgentRunInput['toolSchemas'], history: unknown[], guidance?: string): string {
+type AgentObservation =
+  | { tool: string; args: unknown; result?: unknown; error?: string }
+  | { rejectedUnknownTool: string }
+  | { revised: string }
+  | { escalated: string }
+  | { malformedOutput: string };
+
+function buildObservation(task: string, tools: AgentRunInput['toolSchemas'], history: AgentObservation[], guidance?: string): string {
   const toolList = tools.map(t => `- ${t.name}${t.description ? ': ' + compact(t.description, 80) : ''}`).slice(0, 20).join('\n');
   const guide = guidance ? `\n\nGuidance:\n${guidance}` : '';
-  const trail = (history.slice(-6) as Array<Record<string, unknown>>).map((h, i) => {
-    if (h.tool) return `${i + 1}. ${String(h.tool)}(${compact(h.args ?? {}, 100)}) -> ${h.error ? 'ERROR ' + compact(h.error) : 'ok ' + compact(h.result)}`;
-    if (h.rejectedUnknownTool) return `${i + 1}. rejected unknown tool ${String(h.rejectedUnknownTool)}`;
-    if (h.revised) return `${i + 1}. revised: ${compact(h.revised, 100)}`;
-    if (h.escalated) return `${i + 1}. escalated: ${compact(h.escalated, 100)}`;
-    if (h.malformedOutput) return `${i + 1}. malformed output, retry`;
-    return `${i + 1}. ${compact(h, 120)}`;
+  const trail = history.slice(-6).map((h, i) => {
+    if ('tool' in h) return `${i + 1}. ${h.tool}(${compact(h.args ?? {}, 100)}) -> ${h.error ? 'ERROR ' + compact(h.error) : 'ok ' + compact(h.result)}`;
+    if ('rejectedUnknownTool' in h) return `${i + 1}. rejected unknown tool ${h.rejectedUnknownTool}`;
+    if ('revised' in h) return `${i + 1}. revised: ${compact(h.revised, 100)}`;
+    if ('escalated' in h) return `${i + 1}. escalated: ${compact(h.escalated, 100)}`;
+    return `${i + 1}. malformed output, retry`;
   }).join('\n');
   return `Task: ${compact(task, 300)}\n\nTools:\n${toolList}\n\nDone so far:\n${trail || '(nothing yet — pick the first tool call)'}${guide}`;
 }
@@ -115,13 +122,13 @@ export async function agentRun(input: AgentRunInput): Promise<{ decision: AgentD
   const escalation: ModelProvider = input.providers?.escalation ?? new OpenRouterProvider();
   // P1-C4: capability-first scope (falls back to full catalog on no signal).
   const enableCapRouting = input.capabilityRouting ?? (process.env['HELA_CAPABILITY_ROUTING'] !== 'false');
-  const scope = enableCapRouting ? scopeToolsForTask(input.toolSchemas, input.task, { useEpisodicMemory: true }) : null;
-  const toolSchemas = scope && scope.scoped ? scope.tools : input.toolSchemas;
+  const clockTools = currentTimeTools(input.toolSchemas, input.task);
+  const scope = enableCapRouting && !clockTools ? scopeToolsForTask(input.toolSchemas, input.task, { useEpisodicMemory: true }) : null;
+  const toolSchemas = clockTools ?? (scope?.scoped ? scope.tools : input.toolSchemas);
   const knownTools = new Set(toolSchemas.map(t => t.name));
-  const history: unknown[] = [];
+  const history: AgentObservation[] = [];
   let toolCalls = 0;
-  let lastCallSig: string | undefined;
-  let lastToolResult: unknown;
+  let lastSuccessfulCall: string | undefined;
 
   const isPrimary = (p: ModelProvider): boolean => p === primary;
   const esc = new EscalationController(input.escalationPolicy ?? escalationPolicyFromEnv());
@@ -137,9 +144,11 @@ export async function agentRun(input: AgentRunInput): Promise<{ decision: AgentD
     if (stated && session) try { stated.manager.terminate(session.id, reason, detail); } catch { /* best effort */ }
   };
   const handoff = (reason: string, iterations: number): { decision: AgentDecision; toolCalls: number; iterations: number; escalated: boolean; sessionId?: string; escalations: EscalationRecord[]; handoff: boolean } => {
-    end('escalated', reason);
+    const decision = { action: 'escalate' as const, reason };
     rec({ kind: 'escalation', reason, provider: 'agent-handoff' });
-    return { decision: { action: 'escalate' as const, reason }, toolCalls, iterations, escalated: true, sessionId: session?.id, escalations: esc.trail, handoff: true };
+    rec({ kind: 'decision', decision });
+    end('escalated', reason);
+    return { decision, toolCalls, iterations, escalated: true, sessionId: session?.id, escalations: esc.trail, handoff: true };
   };
   /** Single choke point for every provider switch: budgeted, recorded, one-way.
    *  Auto-detects the escalation provider: when none is configured, hands
@@ -148,15 +157,17 @@ export async function agentRun(input: AgentRunInput): Promise<{ decision: AgentD
     if (!escalationUsable) {
       throw new HandoffSignal(`no escalation provider configured (auto-detected none); handing control to the calling agent (${trigger}${detail ? ': ' + detail : ''})`);
     }
-    const record = esc.escalate(trigger, detail); // throws when budget spent
+    esc.escalate(trigger, detail); // throws when budget spent
     provider = escalation;
-    history.push({ escalated: trigger, detail, at: record.at });
-    rec({ kind: 'escalation', reason: `${trigger}${detail ? ': ' + detail : ''}`, provider: 'escalation' });
+    const reason = `${trigger}${detail ? ': ' + detail : ''}`;
+    history.push({ escalated: reason });
+    rec({ kind: 'escalation', reason, provider: 'escalation' });
   };
   const intercept = (e: unknown, iterations: number): ReturnType<typeof handoff> | null => {
     if (e instanceof HandoffSignal) return handoff(e.reason, iterations);
     return null;
   };
+  if (clockTools?.length === 0) return handoff('No current-time tool is available for this request', 0);
   const primaryHealth: { ok: boolean; detail?: string } = await primary.health().catch(() => ({ ok: false, detail: 'health check threw' }));
   if (!primaryHealth.ok) {
     try {
@@ -176,13 +187,9 @@ export async function agentRun(input: AgentRunInput): Promise<{ decision: AgentD
     if (Date.now() - t0 > limits.maxExecutionMs) { end('time_limit'); throw new Error('agent loop: execution time limit exceeded'); }
     if (input.signal?.aborted) { end('aborted'); throw new Error('agent loop: aborted'); }
 
-    // Needle contract: turn 1 frames task+tools; later turns feed the raw
-    // tool result back so the model continues the loop (result-forward).
-    // Anything else (prose wrappers) degrades its confidence.
-    const lastResult = [...history].reverse().find((h): h is { tool: unknown; result: unknown } =>
-      typeof h === 'object' && h !== null && 'tool' in h && 'result' in h);
-    const prompt = (isPrimary(provider) && lastResult)
-      ? `Result of ${String((lastResult as { tool: unknown }).tool)}: ${compact((lastResult as { result: unknown }).result, 400)}\nTask reminder: ${compact(input.task, 200)}`
+    const latest = history.at(-1);
+    const prompt = (needleApi && isPrimary(provider) && latest && 'tool' in latest && !latest.error)
+      ? `Result of ${latest.tool}: ${compact(latest.result, 400)}\nTask reminder: ${compact(input.task, 200)}`
       : buildObservation(
           input.task,
           toolSchemas,
@@ -191,7 +198,7 @@ export async function agentRun(input: AgentRunInput): Promise<{ decision: AgentD
         );
     const req: ModelRequest = {
       prompt,
-      systemPrompt: 'You are Mitosis agent runtime. Output exactly one JSON AgentDecision, no prose: {"action":"call_tool","tool":"...","args":{}} or {"action":"complete","result":...} or {"action":"escalate","reason":"..."} or {"action":"revise","note":"..."}.',
+      systemPrompt: 'You are Mitosis agent runtime. Output exactly one JSON AgentDecision, no prose: {"action":"call_tool","tool":"...","args":{}} or {"action":"complete","result":...} or {"action":"escalate","reason":"..."} or {"action":"revise","note":"..."}. Call only tools relevant to the task and respect its restrictions. Complete only when you can answer the task. After a failed call, revise, retry, or escalate.',
       signal: input.signal,
       timeoutMs: 8000,
       tools: toolSchemas.map(t => ({ name: t.name, description: t.description, schema: t.schema })),
@@ -243,9 +250,16 @@ export async function agentRun(input: AgentRunInput): Promise<{ decision: AgentD
 
     rec({ kind: 'decision', decision });
     if (decision.action === 'complete') {
+      const calledTools = history.flatMap(h => 'tool' in h && !h.error ? [h.tool] : []);
+      const errorCount = history.filter(h => ('tool' in h && h.error) || 'rejectedUnknownTool' in h || 'malformedOutput' in h).length;
+      const failure = toolResultError(decision.result);
+      if (failure || (!calledTools.length && (clockTools || toolCalls > 0))) {
+        const note = failure ?? (clockTools ? 'Get a successful clock result before answering' : 'No tool call has succeeded');
+        history.push({ revised: note });
+        rec({ kind: 'revision', note });
+        continue;
+      }
       end(esc.escalated ? 'escalated' : 'completed');
-      const calledTools = history.filter((h: any) => h && h.tool && !h.error).map((h: any) => String(h.tool));
-      const errorCount = history.filter((h: any) => h && (h.error || h.rejectedUnknownTool || h.malformedOutput)).length;
       if (calledTools.length > 0) {
         retainWorkflowDecision(input.task, calledTools, {
           summary: 'completed agent run',
@@ -267,43 +281,39 @@ export async function agentRun(input: AgentRunInput): Promise<{ decision: AgentD
         end('escalated', e instanceof Error ? e.message : String(e));
         throw e;
       }
-      history.push({ escalated: decision.reason, context: (decision as { context?: unknown }).context });
       continue;
     }
     if (decision.action === 'revise') { history.push({ revised: decision.note }); rec({ kind: 'revision', note: decision.note }); continue; }
     if (decision.action === 'call_tool') {
       if (!knownTools.has(decision.tool)) { history.push({ rejectedUnknownTool: decision.tool }); rec({ kind: 'rejected_tool', tool: decision.tool }); continue; }
-      // Saturation guard: identical re-call means the model has nothing new;
-      // finish with the last result instead of looping or escalating.
       const sig = `${decision.tool}:${JSON.stringify(decision.args)}`;
-      if (sig === lastCallSig && lastToolResult !== undefined) {
-        end(esc.escalated ? 'escalated' : 'completed', 'saturated');
-        return { decision: { action: 'complete', result: lastToolResult, reasoning: 'repeated identical call — task saturated' }, toolCalls, iterations: i, escalated: esc.escalated, sessionId: session?.id, escalations: esc.trail };
+      if (sig === lastSuccessfulCall) {
+        const note = `Skipped identical successful call to ${decision.tool}. Use its result to decide whether to complete or continue.`;
+        history.push({ revised: note });
+        rec({ kind: 'revision', note });
+        continue;
       }
-      lastCallSig = sig;
       if (++toolCalls > limits.maxToolCalls) { end('tool_call_limit'); throw new Error('agent loop: tool call limit exceeded'); }
       rec({ kind: 'tool_call', tool: decision.tool, args: decision.args });
+      let result: unknown;
+      let error: string | undefined;
       try {
-        const result = await input.executor.executeTool(decision.tool, decision.args, input.signal);
-        lastToolResult = result;
-        esc.noteToolResult(true);
-        history.push({ tool: decision.tool, result });
-        rec({ kind: 'tool_result', tool: decision.tool, result });
+        result = await input.executor.executeTool(decision.tool, decision.args, input.signal);
+        error = toolResultError(result);
       } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        history.push({ tool: decision.tool, error: errMsg });
-        rec({ kind: 'tool_result', tool: decision.tool, error: errMsg });
-        // Repeated failures escalate only when a switch is still available;
-        // an already-escalated run records and continues — nowhere else to go.
-        if (esc.noteToolResult(false) && provider !== escalation) {
-          try {
-            doEscalate('repeated_tool_failure', `${decision.tool}: ${errMsg}`.slice(0, 200));
-          } catch (budget) {
-            const h = intercept(budget, i);
-            if (h) return h;
-            end('provider_failure', budget instanceof Error ? budget.message : String(budget));
-            throw budget;
-          }
+        error = (e instanceof Error ? e.message : String(e)) || 'Tool execution failed';
+      }
+      lastSuccessfulCall = error ? undefined : sig;
+      history.push({ tool: decision.tool, args: decision.args, result, error });
+      rec({ kind: 'tool_result', tool: decision.tool, result, error });
+      if (esc.noteToolResult(!error) && provider !== escalation) {
+        try {
+          doEscalate('repeated_tool_failure', `${decision.tool}: ${error}`.slice(0, 200));
+        } catch (budget) {
+          const h = intercept(budget, i);
+          if (h) return h;
+          end('provider_failure', budget instanceof Error ? budget.message : String(budget));
+          throw budget;
         }
       }
     }
@@ -476,11 +486,11 @@ export async function agentStep(input: AgentStepInput): Promise<{
       rec({ kind: 'tool_call', tool: decision.tool, args: decision.args });
       try {
         result = await input.executor.executeTool(decision.tool, decision.args, input.signal);
-        rec({ kind: 'tool_result', tool: decision.tool, result });
+        error = toolResultError(result);
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
-        rec({ kind: 'tool_result', tool: decision.tool, error });
+        error = (e instanceof Error ? e.message : String(e)) || 'Tool execution failed';
       }
+      rec({ kind: 'tool_result', tool: decision.tool, result, error });
     } else {
       rec({ kind: 'tool_call', tool: decision.tool, args: decision.args });
     }

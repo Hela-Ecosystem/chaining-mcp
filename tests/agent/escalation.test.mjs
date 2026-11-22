@@ -63,15 +63,16 @@ describe('agentRun escalation policy', () => {
   test('repeated tool failures escalate mid-run', async () => {
     const run = await agentRun({
       task: 't', toolSchemas: TOOLS,
-      executor: { executeTool: async () => { throw new Error('kaput'); } },
+      executor: { executeTool: async (tool, args) => args.recovery ? { success: true } : { success: false, message: 'kaput' } },
       providers: {
         primary: scriptProvider([call('alpha'), call('alpha'), call('alpha'), done('after')]),
-        escalation: scriptProvider([done('escalated-done')]),
+        escalation: scriptProvider([call('alpha', { recovery: true }), done('escalated-done')]),
       },
       escalationPolicy: { maxEscalations: 1, repeatedToolFailureThreshold: 3 },
       limits: { maxIterations: 8, maxToolCalls: 8, maxExecutionMs: 5000 },
     });
     assert.equal(run.escalated, true);
+    assert.equal(run.toolCalls, 4);
     assert.ok(run.escalations.some(e => e.trigger === 'repeated_tool_failure'));
   });
 

@@ -12,6 +12,8 @@ import { isAgentEnabled, escalationProviderAvailable, detectedEscalationProvider
 import { buildGuidance, buildSkillGuidance } from '../agent/guidance.js';
 import { sharedSkills } from '../skills/skill-discovery.js';
 import { MCP_SERVER_VERSION } from '../version.js';
+import { currentTimeTools } from '../agent/capability-graph.js';
+import { timeManagementTools } from '../tools/time-management-tools.js';
 
 export class RequestHandlers {
   constructor(
@@ -913,11 +915,15 @@ export class RequestHandlers {
         if (!isAgentEnabled()) {
           return { ok: false, error: 'agent runtime disabled (engine missing and MITOSIS_AGENT_ENABLED not set; run npm run needle:fetch or set MITOSIS_AGENT_ENABLED=true)', tool: name };
         }
-        const tools = this.discovery.getTools();
         const taskText = String(args.task || '');
+        const toolSchemas = this.agentToolDecls();
+        if (currentTimeTools(toolSchemas, taskText)?.length === 0) {
+          const clock = timeManagementTools.find(t => t.name === 'get_current_time');
+          if (clock) toolSchemas.push({ name: clock.name, description: clock.description, schema: clock.inputSchema });
+        }
         const { plan, workflowId, run, state } = await runAgentWorkflow({
           task: taskText,
-          toolSchemas: tools.map(t => ({ name: t.name, description: t.description, schema: (t.inputSchema as any)?.properties ? t.inputSchema : undefined })),
+          toolSchemas,
           orchestrator: this.workflowOrchestrator,
           guidance: this.resolveGuidance(taskText),
           limits: {
@@ -928,7 +934,8 @@ export class RequestHandlers {
         });
         const sessionId = run.sessionId || '';
         return {
-          ok: true,
+          ok: run.decision.action === 'complete',
+          ...(run.decision.action === 'escalate' ? { error: run.decision.reason } : {}),
           workflowId,
           sessionId,
           plan: plan.steps,

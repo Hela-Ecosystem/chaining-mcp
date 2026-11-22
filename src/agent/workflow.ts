@@ -27,6 +27,7 @@ import { AgentStateManager } from './state.js';
 import { RunStore } from './run-store.js';
 import type { ModelProvider } from './schemas.js';
 import type { NeedleProvider } from './needle-provider.js';
+import { currentTimeTools } from './capability-graph.js';
 
 /** Map a validated AgentPlan (1-based step numbers) onto workflow step ids. */
 export function planToWorkflow(
@@ -72,14 +73,14 @@ export async function runAgentWorkflow(input: AgentWorkflowInput): Promise<{
   state: AgentStateManager;
 }> {
   const state = new AgentStateManager();
-  const toolsSummary = input.toolSchemas.map(t => `${t.name}: ${t.description || ''}`).join('\n');
-  const plan = await planTask(
-    input.task, toolsSummary, input.signal, input.providers,
-    input.toolSchemas.map(t => ({ name: t.name, description: t.description, schema: t.schema })),
-    input.guidance,
-  );
+  const clockTools = currentTimeTools(input.toolSchemas, input.task);
+  const tools = clockTools ?? input.toolSchemas;
+  const toolsSummary = tools.map(t => `${t.name}: ${t.description || ''}`).join('\n');
+  const plan = clockTools?.length === 0
+    ? { task: input.task, steps: [] }
+    : await planTask(input.task, toolsSummary, input.signal, input.providers, tools, input.guidance);
 
-  const registry = new Set(input.toolSchemas.map(t => t.name));
+  const registry = new Set(tools.map(t => t.name));
   for (const s of plan.steps) if (s.tool) registry.add(s.tool);
   input.orchestrator.setAllowedTools([...registry]);
 
@@ -108,7 +109,7 @@ export async function runAgentWorkflow(input: AgentWorkflowInput): Promise<{
   try {
     const run = await agentRun({
       task: input.task,
-      toolSchemas: input.toolSchemas,
+      toolSchemas: tools,
       executor,
       signal: input.signal,
       limits: input.limits,
@@ -121,6 +122,12 @@ export async function runAgentWorkflow(input: AgentWorkflowInput): Promise<{
       store.finishRun(workflowId, run.decision.action === 'complete' ? 'completed' : 'failed');
     }
     return { plan, workflowId, run, state };
+  } catch (error) {
+    if (store) {
+      store.recordEvent(workflowId, 'agent_end', { action: 'failed', error: error instanceof Error ? error.message : String(error) });
+      store.finishRun(workflowId, 'failed');
+    }
+    throw error;
   } finally {
     input.orchestrator.clearAllowedTools();
   }
