@@ -10,11 +10,11 @@ Run a task through the Needle agent runtime: plans with the local model, execute
 
 ## `analyze_tool_chain_performance`
 
-Analyze performance metrics and efficiency of tool chains. Provides execution time estimates, complexity analysis, and optimization suggestions
+Check tool availability and analyze dependencies. Duration and complexity are catalog estimates, returned as null when unavailable.
 
 ## `analyze_tools`
 
-Analyzes available tools from discovered MCP servers
+Lists discovered tools by server (category). Complexity is a catalog estimate or null when unavailable.
 
 ## `analyze_with_sequential_thinking`
 
@@ -50,7 +50,7 @@ Load a skill file (SKILL.md by default) plus its manifest for agent context or h
 
 ## `get_tool_chain_analysis`
 
-Gets comprehensive analysis of available tools and suggested routes
+Summarizes discovered tools and recommends catalog matches for individual operations in the input.
 
 ## `list_mcp_servers`
 
