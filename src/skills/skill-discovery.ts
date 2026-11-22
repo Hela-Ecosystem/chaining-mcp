@@ -27,24 +27,79 @@ function defaultSkillDirs(): string[] {
   ];
 }
 
-function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
+interface ParsedFrontmatter {
+  data: Record<string, string>;
+  body: string;
+  error?: string;
+}
+
+/** Strip wrapping quotes and a trailing ` # comment` that is not inside them. */
+function cleanScalar(value: string): string {
+  const quote = value[0];
+  if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length > 1) {
+    return value.slice(1, -1);
+  }
+  const comment = value.search(/\s#/);
+  return (comment >= 0 ? value.slice(0, comment) : value).trim();
+}
+
+function parseFrontmatter(raw: string): ParsedFrontmatter {
   const data: Record<string, string> = {};
   // Normalize Windows checkouts before parsing frontmatter delimiters and keys.
   const text = raw.replace(/\r\n?/g, '\n');
   if (!text.startsWith('---')) return { data, body: text };
   const end = text.indexOf('\n---', 3);
-  if (end < 0) return { data, body: text };
-  const head = text.slice(3, end);
-  let currentKey = '';
-  for (const line of head.split('\n')) {
-    const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (m) {
-      currentKey = m[1];
-      data[currentKey] = m[2].trim();
-    } else if (currentKey && /^\s+/.test(line)) {
-      data[currentKey] += ' ' + line.trim();
-    }
+  if (end < 0) {
+    return { data, body: text, error: 'frontmatter opened with --- but never closed' };
   }
+
+  const head = text.slice(3, end);
+  let currentKey: string | undefined;
+  let block: { style: '|' | '>'; indent: number; lines: string[] } | undefined;
+
+  const flushBlock = () => {
+    if (!currentKey || !block) return;
+    data[currentKey] = block.style === '|' ? block.lines.join('\n') : block.lines.join(' ');
+    block = undefined;
+  };
+
+  for (const rawLine of head.split('\n')) {
+    const line = rawLine.replace(/\s+$/, '');
+    if (block) {
+      const indent = (line.match(/^\s*/) ?? [''])[0].length;
+      if (line.trim() === '' || indent >= block.indent) {
+        block.lines.push(line.trim());
+        continue;
+      }
+      flushBlock();
+    }
+    if (!line.trim()) continue;
+    const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!m) {
+      // Continuation of a wrapped value; keeps `description: >` and plain wraps working.
+      if (currentKey && /^\s+/.test(line)) {
+        data[currentKey] = `${data[currentKey]} ${line.trim()}`.trim();
+      }
+      continue;
+    }
+    const key = m[1];
+    const value = m[2].trim();
+    currentKey = key;
+    // Block scalars may carry chomping/indentation indicators (`>-`, `|+2`).
+    const blockMatch = /^([|>])[+-]?\d*$/.exec(value);
+    if (blockMatch) {
+      block = {
+        style: blockMatch[1] as '|' | '>',
+        indent: (line.match(/^\s*/) ?? [''])[0].length + 2,
+        lines: [],
+      };
+      data[key] = '';
+      continue;
+    }
+    data[key] = cleanScalar(value);
+  }
+  flushBlock();
+
   return { data, body: text.slice(end + 4).trim() };
 }
 
@@ -76,6 +131,8 @@ function listFilesRecursive(dir: string, base: string, out: string[], depth = 0)
  */
 export class SkillDiscovery {
   private cache: { key: string; at: number; skills: SkillInfo[] } | undefined;
+  /** Files that looked like skills but could not be parsed (name -> reason). */
+  private parseErrors = new Map<string, string>();
   private readonly cacheTtlMs = 10000;
 
   /** Scan with short TTL cache (per directory-set) so hot guidance paths
@@ -93,6 +150,12 @@ export class SkillDiscovery {
 
   clearCache(): void {
     this.cache = undefined;
+    this.parseErrors.clear();
+  }
+
+  /** Parse failures observed by the last scan, for honest "not found" answers. */
+  parseFailures(): Array<{ skill: string; reason: string }> {
+    return [...this.parseErrors.entries()].map(([skill, reason]) => ({ skill, reason }));
   }
 
   private scanFresh(dirs: string[]): SkillInfo[] {
@@ -112,7 +175,12 @@ export class SkillDiscovery {
         if (!existsSync(skillFile)) continue;
         try {
           const text = readFileSync(skillFile, 'utf8');
-          const { data, body } = parseFrontmatter(text);
+          const { data, body, error } = parseFrontmatter(text);
+          if (error) {
+            this.parseErrors.set(e, `${skillFile}: ${error}`);
+            continue;
+          }
+          this.parseErrors.delete(e);
           const name = data.name || e;
           if (seen.has(name)) continue;
           const files: string[] = [];

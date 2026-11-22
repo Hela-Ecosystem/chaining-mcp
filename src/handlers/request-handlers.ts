@@ -10,7 +10,7 @@ import { LLMManager } from '../managers/llm-manager.js';
 import { runAgentWorkflow } from '../agent/workflow.js';
 import { isAgentEnabled, escalationProviderAvailable, detectedEscalationProvider } from '../agent/diagnostics.js';
 import { buildGuidance, buildSkillGuidance } from '../agent/guidance.js';
-import { sharedSkills } from '../skills/skill-discovery.js';
+import { sharedSkills, type SkillDetail } from '../skills/skill-discovery.js';
 import { MCP_SERVER_VERSION } from '../version.js';
 import { currentTimeTools } from '../agent/capability-graph.js';
 import { timeManagementTools } from '../tools/time-management-tools.js';
@@ -24,6 +24,36 @@ interface AnalysisStep {
   dependsOn?: string[];
   outputMapping?: Record<string, string>;
   retryOnFailure?: boolean;
+}
+
+/**
+ * Keep the *whole* skill response inside maxChars. The previous bound applied to
+ * `content` only, so a skill with hundreds of files returned a 59 KB file list
+ * regardless of the cap (chaining-mcp#26).
+ */
+function boundSkillResponse(detail: SkillDetail, file: string, maxChars: number) {
+  const build = (content: string, files: string[]) => ({
+    ok: true as const,
+    name: detail.name,
+    description: detail.description,
+    file,
+    files,
+    ...(files.length < detail.files.length ? { filesOmitted: detail.files.length - files.length } : {}),
+    content,
+  });
+
+  let content = detail.content;
+  let response = build(content, detail.files);
+  if (JSON.stringify(response).length <= maxChars) return response;
+
+  // File list first: it is the part that grows without bound.
+  response = build(content, []);
+  if (JSON.stringify(response).length <= maxChars) return response;
+
+  const overflow = JSON.stringify(response).length - maxChars;
+  const suffix = '\n…[truncated]';
+  content = content.slice(0, Math.max(0, content.length - overflow - suffix.length)) + suffix;
+  return build(content, []);
 }
 
 export class RequestHandlers {
@@ -931,15 +961,19 @@ export class RequestHandlers {
 
       case 'get_skill': {
         const file = typeof args.file === 'string' && args.file.trim() ? args.file.trim() : 'SKILL.md';
-        const detail = catalog.get(String(args.name || ''), undefined, file);
-        if (!detail) return { ok: false, error: `unknown skill '${args.name}'` };
+        const name = String(args.name || '');
+        const detail = catalog.get(name, undefined, file);
+        if (!detail) {
+          // A SKILL.md that failed to parse is not the same as a missing skill.
+          const failures = catalog.parseFailures();
+          return {
+            ok: false,
+            error: `unknown skill '${name}'`,
+            ...(failures.length ? { parseFailures: failures.slice(0, 5) } : {}),
+          };
+        }
         const maxChars = Math.min(Math.max(Number(args.maxChars) || 8000, 500), 60000);
-        return {
-          ok: true, name: detail.name, description: detail.description,
-          file,
-          files: detail.files,
-          content: detail.content.length > maxChars ? detail.content.slice(0, maxChars) + '\n…[truncated]' : detail.content,
-        };
+        return boundSkillResponse(detail, file, maxChars);
       }
 
       case 'suggest_skill_chain': {
