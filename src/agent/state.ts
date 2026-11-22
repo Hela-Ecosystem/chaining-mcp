@@ -15,6 +15,7 @@ export type AgentEvent =
   | { kind: 'observation'; text: string }
   | { kind: 'decision'; decision: unknown }
   | { kind: 'tool_call'; tool: string; args: unknown }
+  | { kind: 'proposed_call'; tool: string; args: unknown }
   | { kind: 'tool_result'; tool: string; result?: unknown; error?: string }
   | { kind: 'revision'; note: string }
   | { kind: 'branch'; branchId: string; fromEvent: number }
@@ -78,6 +79,7 @@ export class AgentStateManager {
     return s.events.slice(-n).map(e => {
       switch (e.kind) {
         case 'tool_call': return `call ${e.tool}(${JSON.stringify(e.args).slice(0, 100)})`;
+        case 'proposed_call': return `proposed ${e.tool}(${JSON.stringify(e.args).slice(0, 100)})`;
         case 'tool_result': return e.error ? `${e.tool} ERROR ${e.error.slice(0, 100)}` : `${e.tool} ok ${(JSON.stringify(e.result) ?? String(e.result)).slice(0, 100)}`;
         case 'decision': return `decision ${JSON.stringify(e.decision).slice(0, 120)}`;
         case 'escalation': return `escalated: ${e.reason.slice(0, 120)}`;
@@ -90,12 +92,13 @@ export class AgentStateManager {
     });
   }
 
-  stats(sessionId: string): { events: number; toolCalls: number; errors: number; escalations: number; revisions: number; droppedEvents: number; terminated?: TerminationReason } | undefined {
+  stats(sessionId: string): { events: number; toolCalls: number; proposedCalls: number; errors: number; escalations: number; revisions: number; droppedEvents: number; terminated?: TerminationReason } | undefined {
     const s = this.sessions.get(sessionId);
     if (!s) return undefined;
     return {
       events: s.events.length,
       toolCalls: s.events.filter(e => e.kind === 'tool_call').length,
+      proposedCalls: s.events.filter(e => e.kind === 'proposed_call').length,
       errors: s.events.filter(e => e.kind === 'tool_result' && e.error).length,
       escalations: s.events.filter(e => e.kind === 'escalation').length,
       revisions: s.events.filter(e => e.kind === 'revision').length,

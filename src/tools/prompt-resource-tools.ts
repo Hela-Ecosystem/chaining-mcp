@@ -1,4 +1,5 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { promptCategories, resourceSetCategories } from '../prompts/prompt-definitions.js';
 
 export const promptResourceTools: Tool[] = [
   {
@@ -19,7 +20,7 @@ export const promptResourceTools: Tool[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query to match against prompt names, descriptions, categories, or tags' },
-        category: { type: 'string', enum: ['development', 'debugging', 'analysis', 'orchestration', 'monitoring', 'security'], description: 'Filter by category' },
+        category: { type: 'string', enum: promptCategories, description: 'Filter by category' },
         complexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Filter by complexity level' },
       },
       required: ['query'],
@@ -43,7 +44,7 @@ export const promptResourceTools: Tool[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query to match against resource set names, descriptions, categories, or tags' },
-        category: { type: 'string', enum: ['development', 'debugging', 'analysis', 'orchestration', 'monitoring', 'security'], description: 'Filter by category' },
+        category: { type: 'string', enum: resourceSetCategories, description: 'Filter by category' },
         complexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Filter by complexity level' },
       },
       required: ['query'],

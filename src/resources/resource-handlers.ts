@@ -1,6 +1,6 @@
 import { MCPServerDiscovery } from '../core/discovery.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
-import { AwesomeCopilotIntegration } from '../integrations/awesome-copilot-integration.js';
+import { AwesomeCopilotIntegration, LOCAL_FALLBACK_NOTICE } from '../integrations/awesome-copilot-integration.js';
 import { WorkflowOrchestrator } from '../managers/workflow-orchestrator.js';
 import { LLMManager } from '../managers/llm-manager.js';
 
@@ -96,12 +96,16 @@ export class ResourceHandlers {
       case 'chaining://awesome-copilot/instructions':
         const instructions = this.awesomeCopilotIntegration.getInstructions();
         return {
+          source: 'local_fallback',
+          status: 'degraded',
           instructions: instructions.map(i => ({
             filename: i.filename,
-            mode: (i as any).mode || 'unknown',
-            description: (i as any).description || 'No description',
+            mode: i.mode || 'unknown',
+            description: i.metadata?.description || 'No description',
+            stub: true,
           })),
           total: instructions.length,
+          warning: LOCAL_FALLBACK_NOTICE,
         };
 
       case 'chaining://awesome-copilot/status':
@@ -111,7 +115,13 @@ export class ResourceHandlers {
           collectionsCount: collections2.length,
           instructionsCount: instructions2.length,
           lastUpdate: new Date().toISOString(),
-          status: 'active',
+          // There is no live awesome-copilot connection: only the bundled
+          // heading-outline stubs exist, so the integration is degraded even
+          // when it reports ready.
+          status: 'degraded',
+          source: 'local_fallback',
+          warning: LOCAL_FALLBACK_NOTICE,
+          stubs: instructions2.map(i => i.filename),
         };
 
       case 'chaining://sequential/state': {

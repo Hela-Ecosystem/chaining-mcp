@@ -39,9 +39,11 @@ describe('agentStep', () => {
     assert.equal(s.decision.action, 'call_tool');
     assert.equal(s.result, undefined);
     const st = m.stats(s.sessionId);
-    assert.equal(st.toolCalls, 1); // recorded intent
+    assert.equal(st.toolCalls, 0); // execute:false proposes, it does not call
+    assert.equal(st.proposedCalls, 1);
     assert.equal(st.terminated, undefined);
     assert.ok(m.tail(s.sessionId).join('|').includes('hmm alpha next')); // observation visible in tail
+    assert.ok(m.tail(s.sessionId).join('|').includes('proposed alpha')); // proposal visible, not a call
   });
 
   test('execute=true runs executor and records result', async () => {

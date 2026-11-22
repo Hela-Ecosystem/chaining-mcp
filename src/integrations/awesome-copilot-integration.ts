@@ -36,6 +36,13 @@ export interface AwesomeCopilotSearchResult {
   category?: string;
 }
 
+/** Honest description of what the built-in fallback is (and is not). */
+export const LOCAL_FALLBACK_NOTICE =
+  'local_fallback is degraded: it serves two bundled heading outlines, not the awesome-copilot repository. Configure the awesome-copilot MCP server (and GITHUB_TOKEN) for the full instructions.';
+
+export const LOCAL_STUB_CONTENT_NOTICE =
+  '> Local stub: this is a heading outline only, not the full awesome-copilot instruction.';
+
 export class AwesomeCopilotIntegration {
   private collections: Map<string, AwesomeCopilotCollection> = new Map();
   private instructions: Map<string, AwesomeCopilotInstruction> = new Map();
@@ -67,47 +74,35 @@ export class AwesomeCopilotIntegration {
   }
 
   /**
-   * Load collections from awesome-copilot (mock implementation)
-   * In real implementation, this would call the awesome-copilot MCP server
+   * Load collections from awesome-copilot.
+   *
+   * These are local stubs, not the awesome-copilot repository. A collection may
+   * only list items `load_instruction` can actually return, so every entry
+   * points at one of the bundled instruction summaries; prompts and chat modes
+   * are not bundled and would be dangling references (chaining-mcp#27).
    */
   private async loadCollections(): Promise<void> {
     try {
       // This is a placeholder - in real implementation, we'd call:
       // const collections = await this.callAwesomeCopilotTool('list_collections');
 
-      // For now, we'll create mock collections based on the known structure
       const mockCollections: AwesomeCopilotCollection[] = [
         {
           id: 'typescript-mcp-development',
-          name: 'TypeScript MCP Server Development',
-          description: 'Complete toolkit for building Model Context Protocol servers in TypeScript/Node.js',
+          name: 'TypeScript MCP Server Development (local stub)',
+          description: 'Local heading-outline stub for TypeScript/Node.js MCP servers; the full awesome-copilot toolkit needs the awesome-copilot MCP server',
           tags: ['typescript', 'mcp', 'model-context-protocol', 'nodejs', 'server-development'],
           items: [
-            { path: 'instructions/typescript-mcp-server.instructions.md', kind: 'instruction' },
-            { path: 'prompts/typescript-mcp-server-generator.prompt.md', kind: 'prompt' },
-            { path: 'chatmodes/typescript-mcp-expert.chatmode.md', kind: 'chat-mode' }
+            { path: 'instructions/typescript-mcp-server.instructions.md', kind: 'instruction' }
           ]
         },
         {
           id: 'python-mcp-development',
-          name: 'Python MCP Server Development',
-          description: 'Complete toolkit for building Model Context Protocol servers in Python',
+          name: 'Python MCP Server Development (local stub)',
+          description: 'Local heading-outline stub for Python MCP servers; the full awesome-copilot toolkit needs the awesome-copilot MCP server',
           tags: ['python', 'mcp', 'model-context-protocol', 'fastmcp', 'server-development'],
           items: [
-            { path: 'instructions/python-mcp-server.instructions.md', kind: 'instruction' },
-            { path: 'prompts/python-mcp-server-generator.prompt.md', kind: 'prompt' },
-            { path: 'chatmodes/python-mcp-expert.chatmode.md', kind: 'chat-mode' }
-          ]
-        },
-        {
-          id: 'frontend-web-dev',
-          name: 'Frontend Web Development',
-          description: 'Essential prompts, instructions, and chat modes for modern frontend web development',
-          tags: ['frontend', 'web', 'react', 'typescript', 'javascript', 'css', 'html'],
-          items: [
-            { path: 'chatmodes/expert-react-frontend-engineer.chatmode.md', kind: 'chat-mode' },
-            { path: 'instructions/reactjs.instructions.md', kind: 'instruction' },
-            { path: 'instructions/nextjs.instructions.md', kind: 'instruction' }
+            { path: 'instructions/python-mcp-server.instructions.md', kind: 'instruction' }
           ]
         }
       ];
@@ -133,7 +128,8 @@ export class AwesomeCopilotIntegration {
         {
           mode: 'instructions',
           filename: 'typescript-mcp-server.instructions.md',
-          content: `# TypeScript MCP Server Development
+          content: `${LOCAL_STUB_CONTENT_NOTICE}
+# TypeScript MCP Server Development
 
 ## Overview
 This guide covers building Model Context Protocol (MCP) servers using TypeScript and Node.js.
@@ -151,8 +147,8 @@ This guide covers building Model Context Protocol (MCP) servers using TypeScript
 4. Follow MCP protocol specifications
 5. Document your server capabilities`,
           metadata: {
-            title: 'TypeScript MCP Server Development',
-            description: 'Complete guide for building MCP servers in TypeScript',
+            title: 'TypeScript MCP Server Development (local stub)',
+            description: 'Local stub: heading outline only; the full guide needs the awesome-copilot MCP server',
             tags: ['typescript', 'mcp', 'server-development'],
             category: 'development'
           }
@@ -160,7 +156,8 @@ This guide covers building Model Context Protocol (MCP) servers using TypeScript
         {
           mode: 'instructions',
           filename: 'python-mcp-server.instructions.md',
-          content: `# Python MCP Server Development
+          content: `${LOCAL_STUB_CONTENT_NOTICE}
+# Python MCP Server Development
 
 ## Overview
 This guide covers building Model Context Protocol (MCP) servers using Python and FastMCP.
@@ -178,8 +175,8 @@ This guide covers building Model Context Protocol (MCP) servers using Python and
 4. Follow MCP protocol specifications
 5. Document your server capabilities`,
           metadata: {
-            title: 'Python MCP Server Development',
-            description: 'Complete guide for building MCP servers in Python',
+            title: 'Python MCP Server Development (local stub)',
+            description: 'Local stub: heading outline only; the full guide needs the awesome-copilot MCP server',
             tags: ['python', 'mcp', 'fastmcp', 'server-development'],
             category: 'development'
           }

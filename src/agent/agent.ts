@@ -492,7 +492,9 @@ export async function agentStep(input: AgentStepInput): Promise<{
       }
       rec({ kind: 'tool_result', tool: decision.tool, result, error });
     } else {
-      rec({ kind: 'tool_call', tool: decision.tool, args: decision.args });
+      // execute:false only proposes the call; recording it as tool_call made
+      // state claim an execution that never happened (chaining-mcp#27).
+      rec({ kind: 'proposed_call', tool: decision.tool, args: decision.args });
     }
   } else if (decision.action === 'escalate') {
     escalated = true;

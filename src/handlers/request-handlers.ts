@@ -4,7 +4,7 @@ import { MCPServerDiscovery } from '../core/discovery.js';
 import { SmartRouteOptimizer } from '../core/optimizer.js';
 import { TimeManager } from '../managers/time-manager.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
-import { AwesomeCopilotIntegration } from '../integrations/awesome-copilot-integration.js';
+import { AwesomeCopilotIntegration, LOCAL_FALLBACK_NOTICE } from '../integrations/awesome-copilot-integration.js';
 import { WorkflowOrchestrator } from '../managers/workflow-orchestrator.js';
 import { LLMManager } from '../managers/llm-manager.js';
 import { runAgentWorkflow } from '../agent/workflow.js';
@@ -501,16 +501,24 @@ export class RequestHandlers {
       }
     }
 
-    // Graceful local fallback
+    // Graceful local fallback. It is always degraded: two bundled heading
+    // outlines are not the awesome-copilot repository, whether or not a token
+    // is set (chaining-mcp#27).
+    const fallback = (extra: Record<string, unknown> = {}) => ({
+      source: 'local_fallback' as const,
+      status: 'degraded' as const,
+      warning: LOCAL_FALLBACK_NOTICE,
+      degraded: {
+        reason: LOCAL_FALLBACK_NOTICE,
+        ...(githubToken ? {} : { hint: 'set GITHUB_TOKEN and configure the awesome-copilot MCP server' }),
+      },
+      ...extra,
+    });
+
     if (name === 'search_instructions') {
       const keywords = String(args.keywords || '');
       const results = this.awesomeCopilotIntegration.searchInstructions(keywords);
-      return {
-        source: 'local_fallback',
-        warning: !githubToken ? 'Using local collection (set GITHUB_TOKEN for full GitHub integration)' : undefined,
-        results,
-        total: results.length,
-      };
+      return fallback({ results, total: results.length });
     }
 
     if (name === 'load_instruction') {
@@ -518,16 +526,12 @@ export class RequestHandlers {
       const filename = String(args.filename || '');
       const instruction = this.awesomeCopilotIntegration.getInstruction(mode, filename);
       if (instruction) {
-        return {
-          source: 'local_fallback',
-          warning: !githubToken ? 'Using local collection (set GITHUB_TOKEN for full GitHub integration)' : undefined,
-          ...instruction,
-        };
+        return fallback({ ...instruction });
       }
-      return {
+      return fallback({
         error: `Instruction not found: ${mode}/${filename}`,
-        source: 'local_fallback',
-      };
+        available: this.awesomeCopilotIntegration.getInstructions().map(i => `${i.mode}/${i.filename}`),
+      });
     }
 
     throw new Error(`Unknown awesome copilot tool: ${name}`);

@@ -53,7 +53,7 @@ export const predefinedPrompts: PrebuiltPrompt[] = [
 5. **Configuration**: Important configuration files and settings
 
 Use the available filesystem tools to explore the codebase systematically. Start with the root directory, then examine key configuration files (package.json, tsconfig.json, etc.), and finally look at main source directories.`,
-    expectedTools: ['list_dir', 'read_file', 'grep']
+    expectedTools: ['hela_membrane_list_directory', 'read_file', 'hela_membrane_search_in_files']
   },
 
   {
@@ -78,7 +78,7 @@ Steps to follow:
 - Check imports and dependencies
 - Look for similar patterns in working code
 - Test the fix thoroughly`,
-    expectedTools: ['grep', 'read_file', 'search_replace', 'run_terminal_cmd']
+    expectedTools: ['hela_membrane_search_in_files', 'read_file', 'hela_membrane_write_file', 'hela_nucleus_execute_command']
   },
 
   {
@@ -104,7 +104,7 @@ Analysis approach:
 - Look for memory-intensive operations
 - Implement caching where beneficial
 - Test performance improvements`,
-    expectedTools: ['run_terminal_cmd', 'grep', 'read_file', 'search_replace']
+    expectedTools: ['hela_nucleus_execute_command', 'hela_membrane_search_in_files', 'read_file', 'hela_membrane_write_file']
   },
 
   // Workflow Prompts
@@ -132,7 +132,7 @@ Implementation steps:
 - Ensure proper error handling and edge cases
 - Follow existing code conventions and patterns
 - Write unit tests and integration tests`,
-    expectedTools: ['read_file', 'grep', 'search_replace', 'run_terminal_cmd', 'todo_write']
+    expectedTools: ['read_file', 'hela_membrane_search_in_files', 'hela_membrane_write_file', 'hela_nucleus_execute_command', 'hela_genome_create_mission']
   },
 
   {
@@ -158,7 +158,7 @@ Refactoring focus areas:
 - Add proper error handling
 - Simplify conditional logic
 - Improve code organization and structure`,
-    expectedTools: ['read_file', 'grep', 'search_replace', 'run_terminal_cmd']
+    expectedTools: ['read_file', 'hela_membrane_search_in_files', 'hela_membrane_write_file', 'hela_nucleus_execute_command']
   },
 
   // Analysis Prompts
@@ -187,7 +187,7 @@ Audit checklist:
 - Check file upload and download security
 - Review error messages for information disclosure
 - Update vulnerable dependencies`,
-    expectedTools: ['grep', 'read_file', 'run_terminal_cmd']
+    expectedTools: ['hela_membrane_search_in_files', 'read_file', 'hela_nucleus_execute_command']
   },
 
   {
@@ -213,7 +213,7 @@ Analysis steps:
 - Review dependency licenses
 - Identify opportunities for consolidation
 - Update outdated packages safely`,
-    expectedTools: ['read_file', 'grep', 'run_terminal_cmd']
+    expectedTools: ['read_file', 'hela_membrane_search_in_files', 'hela_nucleus_execute_command']
   },
 
   // Tool-Specific Prompts
@@ -355,7 +355,7 @@ Identify servers that can work together, design the data flow, and implement the
 5. **Knowledge Transfer**: Learn from the curated development wisdom
 
 Browse collections, search for relevant instructions, and apply them to enhance your development process.`,
-    expectedTools: ['awesome_copilot_list_collections', 'awesome_copilot_search_collections', 'awesome_copilot_get_collection', 'awesome_copilot_search_instructions']
+    expectedTools: ['hela_mitosis_search_instructions']
   },
 
   {
@@ -395,7 +395,7 @@ Convert between timezones, plan task sequences, and execute with time awareness.
 5. **Coordinated Resolution**: Implement fixes that may span multiple servers
 
 Systematically debug issues that involve multiple MCP servers working together.`,
-    expectedTools: ['list_mcp_servers', 'analyze_tools', 'sequentialthinking', 'awesome_copilot_search_instructions']
+    expectedTools: ['list_mcp_servers', 'analyze_tools', 'sequentialthinking', 'hela_mitosis_search_instructions']
   },
 
   {
@@ -515,7 +515,7 @@ Coordinate complex development efforts using multiple MCP servers and team capab
 5. **Remediation Planning**: Plan fixes and improvements based on findings
 
 Execute comprehensive QA processes using multiple MCP servers and specialized tools.`,
-    expectedTools: ['generate_route_suggestions', 'analyze_tools', 'sequentialthinking', 'awesome_copilot_search_instructions']
+    expectedTools: ['generate_route_suggestions', 'analyze_tools', 'sequentialthinking', 'hela_mitosis_search_instructions']
   },
 
   {
@@ -535,7 +535,7 @@ Execute comprehensive QA processes using multiple MCP servers and specialized to
 5. **Knowledge Synthesis**: Combine insights from multiple resource sources
 
 Discover and utilize the full spectrum of resources available in your MCP ecosystem.`,
-    expectedTools: ['list_mcp_servers', 'analyze_tools', 'awesome_copilot_list_collections', 'awesome_copilot_search_collections']
+    expectedTools: ['list_mcp_servers', 'analyze_tools']
   },
 
   {
@@ -632,7 +632,7 @@ Manage complex enterprise integrations using coordinated MCP server capabilities
 - Clear understanding of architecture
 - Identified strengths and improvement areas
 - Actionable recommendations provided`,
-    expectedTools: ['list_dir', 'read_file', 'grep', 'run_terminal_cmd', 'analyze_tools', 'todo_write']
+    expectedTools: ['hela_membrane_list_directory', 'read_file', 'hela_membrane_search_in_files', 'hela_nucleus_execute_command', 'analyze_tools', 'hela_genome_create_mission']
   },
 
   {
@@ -692,7 +692,7 @@ Manage complex enterprise integrations using coordinated MCP server capabilities
 - No production incidents post-deployment
 - User acceptance criteria met
 - Performance within acceptable limits`,
-    expectedTools: ['read_file', 'grep', 'search_replace', 'run_terminal_cmd', 'todo_write', 'analyze_tools']
+    expectedTools: ['read_file', 'hela_membrane_search_in_files', 'hela_membrane_write_file', 'hela_nucleus_execute_command', 'hela_genome_create_mission', 'analyze_tools']
   },
 
   {
@@ -755,7 +755,7 @@ Manage complex enterprise integrations using coordinated MCP server capabilities
 - Regular status updates to stakeholders
 - Clear documentation of findings and actions
 - Post-incident review and improvement recommendations`,
-    expectedTools: ['grep', 'read_file', 'run_terminal_cmd', 'analyze_tools', 'sequentialthinking', 'todo_write']
+    expectedTools: ['hela_membrane_search_in_files', 'read_file', 'hela_nucleus_execute_command', 'analyze_tools', 'sequentialthinking', 'hela_genome_create_mission']
   },
 
   {
@@ -887,7 +887,7 @@ Manage complex enterprise integrations using coordinated MCP server capabilities
 - Provide training and documentation
 - Monitor AI tool effectiveness and accuracy
 - Continuously refine and improve the workflow`,
-    expectedTools: ['analyze_tools', 'generate_route_suggestions', 'awesome_copilot_search_instructions', 'brainstorming', 'sequentialthinking', 'todo_write']
+    expectedTools: ['analyze_tools', 'generate_route_suggestions', 'hela_mitosis_search_instructions', 'brainstorming', 'sequentialthinking', 'hela_genome_create_mission']
   },
 
   {
@@ -956,7 +956,7 @@ Manage complex enterprise integrations using coordinated MCP server capabilities
 - Standardized development and deployment processes
 - Comprehensive documentation and knowledge management
 - Regular architecture assessments and updates`,
-    expectedTools: ['analyze_tools', 'generate_route_suggestions', 'get_tool_chain_analysis', 'sequentialthinking', 'workflow_orchestrator', 'todo_write']
+    expectedTools: ['analyze_tools', 'generate_route_suggestions', 'get_tool_chain_analysis', 'sequentialthinking', 'workflow_orchestrator', 'hela_genome_create_mission']
   },
 
   // Monitoring & Analytics Prompts
@@ -984,7 +984,7 @@ Manage complex enterprise integrations using coordinated MCP server capabilities
 - Maintain historical data for trend analysis
 
 Use the available tools to gather comprehensive health data across all MCP servers.`,
-    expectedTools: ['list_mcp_servers', 'analyze_tools', 'run_terminal_cmd', 'grep']
+    expectedTools: ['list_mcp_servers', 'analyze_tools', 'hela_nucleus_execute_command', 'hela_membrane_search_in_files']
   },
 
   {
@@ -1011,7 +1011,7 @@ Use the available tools to gather comprehensive health data across all MCP serve
 - Implement performance monitoring and alerting
 
 Use performance analysis tools to create optimized, efficient workflows.`,
-    expectedTools: ['get_tool_chain_analysis', 'analyze_tool_chain_performance', 'validate_tool_chain', 'run_terminal_cmd']
+    expectedTools: ['get_tool_chain_analysis', 'analyze_tool_chain_performance', 'validate_tool_chain', 'hela_nucleus_execute_command']
   },
 
   {
@@ -1092,7 +1092,7 @@ Create robust, reliable workflows that can handle failures gracefully and mainta
 - Set up cost monitoring and alerting
 
 Balance performance requirements with cost efficiency to optimize your MCP infrastructure.`,
-    expectedTools: ['analyze_tool_chain_performance', 'get_tool_chain_analysis', 'run_terminal_cmd', 'list_mcp_servers']
+    expectedTools: ['analyze_tool_chain_performance', 'get_tool_chain_analysis', 'hela_nucleus_execute_command', 'list_mcp_servers']
   },
 
   // Security & Compliance Prompts
@@ -1120,7 +1120,7 @@ Balance performance requirements with cost efficiency to optimize your MCP infra
 - Implement security monitoring and alerting
 
 Ensure your MCP ecosystem meets security standards and protects sensitive information.`,
-    expectedTools: ['grep', 'read_file', 'run_terminal_cmd', 'list_mcp_servers', 'analyze_tools']
+    expectedTools: ['hela_membrane_search_in_files', 'read_file', 'hela_nucleus_execute_command', 'list_mcp_servers', 'analyze_tools']
   },
 
   {
@@ -1147,7 +1147,7 @@ Ensure your MCP ecosystem meets security standards and protects sensitive inform
 - Generate compliance reports and remediation plans
 
 Maintain ongoing compliance with regulatory requirements and organizational policies.`,
-    expectedTools: ['read_file', 'grep', 'run_terminal_cmd', 'list_mcp_servers', 'analyze_tools']
+    expectedTools: ['read_file', 'hela_membrane_search_in_files', 'hela_nucleus_execute_command', 'list_mcp_servers', 'analyze_tools']
   },
 
   {
@@ -1174,7 +1174,7 @@ Maintain ongoing compliance with regulatory requirements and organizational poli
 - Set up privacy monitoring and breach detection
 
 Protect user privacy while maintaining functionality in your MCP ecosystem.`,
-    expectedTools: ['grep', 'read_file', 'analyze_tools', 'validate_tool_chain', 'run_terminal_cmd']
+    expectedTools: ['hela_membrane_search_in_files', 'read_file', 'analyze_tools', 'validate_tool_chain', 'hela_nucleus_execute_command']
   },
 
   {
@@ -1201,7 +1201,7 @@ Protect user privacy while maintaining functionality in your MCP ecosystem.`,
 - Set up alerts for suspicious access patterns
 
 Maintain secure access controls throughout your MCP server ecosystem.`,
-    expectedTools: ['read_file', 'grep', 'run_terminal_cmd', 'list_mcp_servers', 'analyze_tools']
+    expectedTools: ['read_file', 'hela_membrane_search_in_files', 'hela_nucleus_execute_command', 'list_mcp_servers', 'analyze_tools']
   },
 
   {
@@ -1228,7 +1228,7 @@ Maintain secure access controls throughout your MCP server ecosystem.`,
 - Conduct regular incident response drills and training
 
 Ensure rapid, effective response to security incidents and system failures.`,
-    expectedTools: ['workflow_orchestrator', 'run_terminal_cmd', 'list_mcp_servers', 'sequentialthinking', 'todo_write']
+    expectedTools: ['workflow_orchestrator', 'hela_nucleus_execute_command', 'list_mcp_servers', 'sequentialthinking', 'hela_genome_create_mission']
   }
 ];
 
@@ -1573,3 +1573,12 @@ export const predefinedResourceSets: ResourceSet[] = [
     ]
   }
 ];
+
+/**
+ * Category enums advertised by the prompt/resource search tools. They are
+ * derived from the data so a category can never be filtered out of existence
+ * (chaining-mcp#27): the previous hand-written six-value enum covered 16 of 40
+ * prompts, leaving the rest unreachable through the `category` filter.
+ */
+export const promptCategories: string[] = [...new Set(predefinedPrompts.map(p => p.category))].sort();
+export const resourceSetCategories: string[] = [...new Set(predefinedResourceSets.map(r => r.category))].sort();
