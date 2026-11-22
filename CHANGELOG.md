@@ -1,4 +1,12 @@
 # Changelog
+## [3.1.2] - 2026-11-23
+
+### Fixed
+- Prompt `expectedTools` reference real HeLa tools again: `run_terminal_cmd` -> `hela_nucleus_execute_command`, `grep` -> `hela_membrane_search_in_files`, `list_dir` -> `hela_membrane_list_directory`, `search_replace` -> `hela_membrane_write_file`, `todo_write` -> `hela_genome_create_mission`, and the `awesome_copilot_*` entries resolve to the real instruction tools. A test now checks every entry against the catalog. (`chaining-mcp#27`)
+- `search_prompts` / `search_resource_sets` derive their `category` enum from the prompt data instead of a fixed six values, so all 52 prompts are reachable by category.
+- The instruction `local_fallback` is always marked `status: degraded` with a notice describing the two heading-outline stubs, and the dangling `reactjs`/`nextjs` collection entries are removed.
+- `sequentialthinking` with `execute:false` records a `proposed_call` instead of a `tool_call`, so state no longer claims a call that did not happen.
+
 ## [Unreleased]
 
 ### Fixed
