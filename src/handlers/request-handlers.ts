@@ -32,8 +32,10 @@ interface AnalysisStep {
  * regardless of the cap (chaining-mcp#26).
  */
 function boundSkillResponse(detail: SkillDetail, file: string, maxChars: number) {
-  const build = (content: string, files: string[]) => ({
+  const build = (content: string, files: string[], droppedReason?: string) => ({
     ok: true as const,
+    // Ecosystem contract: a lossy answer says so in its shape, not only in prose.
+    ...(droppedReason ? { status: 'degraded' as const, degraded: { reason: droppedReason } } : {}),
     name: detail.name,
     description: detail.description,
     file,
@@ -47,13 +49,14 @@ function boundSkillResponse(detail: SkillDetail, file: string, maxChars: number)
   if (JSON.stringify(response).length <= maxChars) return response;
 
   // File list first: it is the part that grows without bound.
-  response = build(content, []);
+  const omitted = detail.files.length;
+  response = build(content, [], `file list omitted to respect maxChars (${omitted} files)`);
   if (JSON.stringify(response).length <= maxChars) return response;
 
   const overflow = JSON.stringify(response).length - maxChars;
   const suffix = '\n…[truncated]';
   content = content.slice(0, Math.max(0, content.length - overflow - suffix.length)) + suffix;
-  return build(content, []);
+  return build(content, [], `content truncated and ${omitted} file paths omitted to respect maxChars`);
 }
 
 export class RequestHandlers {

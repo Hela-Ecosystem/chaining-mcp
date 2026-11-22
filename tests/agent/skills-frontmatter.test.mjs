@@ -107,6 +107,9 @@ test('chaining#26: maxChars bounds the whole response, not only content', async 
     assert.ok(size <= 2000, `response was ${size} chars, over the 2000 cap`);
     assert.equal(result.files.length, 0);
     assert.ok(result.filesOmitted > 0, 'the omitted count is reported');
+    // Ecosystem contract: lossy answers carry status=degraded with a reason.
+    assert.equal(result.status, 'degraded');
+    assert.match(result.degraded.reason, /maxChars/);
   } finally {
     rmSync(root, { recursive: true, force: true });
     delete process.env.MITOSIS_SKILLS_DIRS;
@@ -123,6 +126,7 @@ test('chaining#26: a small skill still returns its files and content', async () 
     assert.deepEqual(result.files, ['SKILL.md']);
     assert.match(result.content, /Body text/);
     assert.equal(result.filesOmitted, undefined);
+    assert.equal(result.status, undefined, 'a complete answer is not marked degraded');
   } finally {
     rmSync(root, { recursive: true, force: true });
     delete process.env.MITOSIS_SKILLS_DIRS;

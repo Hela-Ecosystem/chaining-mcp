@@ -1,4 +1,9 @@
 # Changelog
+## [3.1.1] - 2026-11-22
+
+### Changed
+- `get_skill` marks a lossy answer as degraded. When the file list or content is cut to respect `maxChars`, the response carries `status: "degraded"` and `degraded.reason` naming what was dropped, so `hela.pipe` can report `status: "degraded"` instead of a clean success. (`hela-mcp-ecosystem#8`)
+
 ## [3.1.0] - 2026-11-22
 
 ### Changed
