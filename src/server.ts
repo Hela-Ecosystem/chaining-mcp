@@ -79,7 +79,7 @@ export class ChainingMCPServer {
         throw new Error(`tool '${name}' is not re-entrant inside workflows`);
       }
       if (!isLocal) {
-        if (!runtimeTransport) throw new Error(`No runtime transport bound for server '${serverName}': set HELA_RUNTIME_URL to the runtime's Streamable HTTP endpoint (e.g. http://127.0.0.1:8787/mcp) so cross-cell steps can run`);
+        if (!runtimeTransport) throw new Error(`No runtime transport bound for server '${serverName}': HELA_RUNTIME_URL is not set. The HeLa runtime sets it when it hosts Mitosis (hela-runtime >= 1.4.3); when running Mitosis standalone, set it to the runtime's Streamable HTTP endpoint (e.g. http://127.0.0.1:8787/mcp) so cross-cell steps can run`);
         return runtimeTransport(serverName, name, parameters, signal);
       }
       if (!LOCAL_TOOLS.has(name)) throw new Error(`Unknown tool: ${name}`);

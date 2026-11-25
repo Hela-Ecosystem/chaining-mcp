@@ -1,7 +1,7 @@
 # Enterprise Chaining MCP Server (HeLa Mitosis)
 
 <!-- hela:version:start -->
-**MCP server:** `hela-mitosis` · **Version:** `3.1.2` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
+**MCP server:** `hela-mitosis` · **Version:** `3.1.3` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
 <!-- hela:version:end -->
 
 > **Part of the [HeLa MCP Ecosystem](https://github.com/Hela-Ecosystem/hela-mcp-ecosystem)** — this server is **HeLa Mitosis (`hela-mitosis`)**, the *Orchestrator* component of the HeLa cellular architecture.
@@ -193,7 +193,7 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 | `MEMORY_FILE_PATH` | `./data/memory.json` | Persistent cache file |
 | `HELA_POLICY_PROFILE` | `full-access` | Capability policy profile (`full-access` = legacy behavior; `constrained` denies R3 tools such as remote shell) |
 | `HELA_RUNSTORE_PATH` | `./hela-runs.db` | SQLite WAL run/event store for durable workflows + kill-9 resume |
-| `HELA_RUNTIME_URL` | unset | HeLa Runtime Streamable HTTP endpoint for workflow steps targeting sibling cells, e.g. `http://127.0.0.1:8787/mcp`. Mitosis steps use its local tool registry. |
+| `HELA_RUNTIME_URL` | unset | HeLa Runtime Streamable HTTP endpoint for workflow steps targeting sibling cells, e.g. `http://127.0.0.1:8787/mcp`. The runtime sets it itself when it hosts Mitosis (hela-runtime ≥ 1.4.3); a value you set explicitly takes precedence. Set it manually only when running Mitosis standalone. Mitosis steps use its local tool registry. |
 | `HELA_NEEDLE_THRESHOLD_<FAMILY>` | per-family | Override Needle confidence threshold for a tool family, e.g. `HELA_NEEDLE_THRESHOLD_SHELL=0.8` (strictest family among a call's tools wins) |
 
 ### Zero-Key & Offline
