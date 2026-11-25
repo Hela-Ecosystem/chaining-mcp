@@ -1,7 +1,7 @@
 # Enterprise Chaining MCP Server (HeLa Mitosis)
 
 <!-- hela:version:start -->
-**MCP server:** `hela-mitosis` · **Version:** `3.1.2` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
+**MCP server:** `hela-mitosis` · **Version:** `3.1.3` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
 <!-- hela:version:end -->
 
 > **Part of the [HeLa MCP Ecosystem](https://github.com/Hela-Ecosystem/hela-mcp-ecosystem)** — this server is **HeLa Mitosis (`hela-mitosis`)**, the *Orchestrator* component of the HeLa cellular architecture.
@@ -173,7 +173,7 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `CHAINING_TOOL_TIMEOUT_MS` | `10000` | Interactive tool timeout; model-backed tools (`agent_run`, `brainstorming`, `analyze_with_sequential_thinking`, `suggest_skill_chain`, agent-fronted `sequentialthinking`) use their own budget instead (cap 300s) |
+| `CHAINING_TOOL_TIMEOUT_MS` | `10000` | Interactive tool timeout; model-backed tools (`agent_run`, `brainstorming`, `analyze_with_sequential_thinking`, `suggest_skill_chain`, `llm_suggest_route`, `generate_route_suggestions`, `llm_decompose_task`, agent-fronted `sequentialthinking`) use their own budget instead (default 90s, cap 300s; measured 4–7s on the 300-tool catalog with Needle) |
 | `MITOSIS_AGENT_ENABLED` | *auto* | On when `assets/needle/needle` exists; `false` opts out |
 | `NEEDLE_GENERATION` | `3` | Router generation: `3` (121M ladder, `--model` weights) or `2` (legacy 45M baked) |
 | `NEEDLE_DEPTH` | full | Gen-3 ladder rung 2..20 (e.g. `8` = 52M for small devices); invalid values fall back to full |
@@ -193,7 +193,7 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 | `MEMORY_FILE_PATH` | `./data/memory.json` | Persistent cache file |
 | `HELA_POLICY_PROFILE` | `full-access` | Capability policy profile (`full-access` = legacy behavior; `constrained` denies R3 tools such as remote shell) |
 | `HELA_RUNSTORE_PATH` | `./hela-runs.db` | SQLite WAL run/event store for durable workflows + kill-9 resume |
-| `HELA_RUNTIME_URL` | unset | HeLa Runtime Streamable HTTP endpoint for workflow steps targeting sibling cells, e.g. `http://127.0.0.1:8787/mcp`. Mitosis steps use its local tool registry. |
+| `HELA_RUNTIME_URL` | unset | HeLa Runtime Streamable HTTP endpoint for workflow steps targeting sibling cells, e.g. `http://127.0.0.1:8787/mcp`. The runtime sets it itself when it hosts Mitosis (hela-runtime ≥ 1.4.3); a value you set explicitly takes precedence. Set it manually only when running Mitosis standalone. Mitosis steps use its local tool registry. |
 | `HELA_NEEDLE_THRESHOLD_<FAMILY>` | per-family | Override Needle confidence threshold for a tool family, e.g. `HELA_NEEDLE_THRESHOLD_SHELL=0.8` (strictest family among a call's tools wins) |
 
 ### Zero-Key & Offline

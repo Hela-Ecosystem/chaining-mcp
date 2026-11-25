@@ -1,4 +1,13 @@
 # Changelog
+## [3.1.3] - 2026-11-25
+
+### Fixed
+- A cross-cell `workflow_orchestrator` step with no runtime transport now names `HELA_RUNTIME_URL` in its failure message. The runtime (hela-runtime 1.4.3) sets the variable itself when it hosts Mitosis, and an operator-set value wins; the message and the README env table say so. (`chaining-mcp#28`, ISS-61)
+- `llm_suggest_route`, `generate_route_suggestions` and `llm_decompose_task` use the model-backed tool timeout budget (default 90s, cap 300s) instead of the 10s interactive timeout. (`chaining-mcp#28`, ISS-62)
+- `get_skill` returns distinct errors for a disallowed path, a file not in the skill (listing the available files) and an unknown skill. `maxChars` bounds the body (content plus file list) and no longer charges the description. (`chaining-mcp#28`, ISS-63)
+- `search_prompts` with a `category` or `complexity` filter that matches nothing returns an empty result with a `note` instead of substituting prompts from another category. (`chaining-mcp#28`, ISS-63)
+- Prompt guidance matches `expectedTools` against cell-prefixed tool names (`hela_membrane_read_file`) as well as bare names. (`chaining-mcp#28`, ISS-63)
+
 ## [3.1.2] - 2026-11-23
 
 ### Fixed
