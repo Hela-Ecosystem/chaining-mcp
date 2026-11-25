@@ -217,17 +217,34 @@ export class SkillDiscovery {
   }
 
   get(name: string, dirs?: string[], file = 'SKILL.md'): SkillDetail | undefined {
+    const result = this.lookup(name, dirs, file);
+    return result.detail;
+  }
+
+  /** Like get(), but says why a lookup failed: the skill, the path, or the file. */
+  lookup(name: string, dirs?: string[], file = 'SKILL.md'): SkillLookup {
     const found = this.scan(dirs).find(s => s.name === name);
-    if (!found) return undefined;
-    if (!file || file.startsWith('/') || file.includes('\\') || file.split('/').includes('..') || !found.files.includes(file)) return undefined;
+    if (!found) return { ok: false, reason: 'unknown_skill' };
+    if (!file || file.startsWith('/') || file.includes('\\') || file.includes('\0') || file.split('/').includes('..')) {
+      return { ok: false, reason: 'path_not_allowed' };
+    }
+    if (!found.files.includes(file)) return { ok: false, reason: 'file_not_in_skill', available: found.files };
     try {
       const text = readFileSync(join(found.path, file), 'utf8');
       const { body } = parseFrontmatter(text);
-      return { ...found, content: body };
+      return { ok: true, detail: { ...found, content: body } };
     } catch {
-      return undefined;
+      return { ok: false, reason: 'file_not_in_skill', available: found.files };
     }
   }
+}
+
+export interface SkillLookup {
+  ok: boolean;
+  detail?: SkillDetail;
+  reason?: 'unknown_skill' | 'path_not_allowed' | 'file_not_in_skill';
+  /** Files the skill does have, set when reason is file_not_in_skill. */
+  available?: string[];
 }
 
 let shared: SkillDiscovery | undefined;

@@ -27,9 +27,9 @@ interface AnalysisStep {
 }
 
 /**
- * Keep the *whole* skill response inside maxChars. The previous bound applied to
- * `content` only, so a skill with hundreds of files returned a 59 KB file list
- * regardless of the cap (chaining-mcp#26).
+ * Keep the skill body (content plus file list) inside maxChars so a skill with
+ * hundreds of files cannot return a 59 KB list (chaining-mcp#26). The
+ * description is metadata and is not charged to the budget (chaining-mcp#28).
  */
 function boundSkillResponse(detail: SkillDetail, file: string, maxChars: number) {
   const build = (content: string, files: string[], droppedReason?: string) => ({
@@ -44,18 +44,19 @@ function boundSkillResponse(detail: SkillDetail, file: string, maxChars: number)
     content,
   });
 
+  // The budget covers the body (content + file list); the description is
+  // metadata and never crowds the body out (chaining-mcp#28).
   let content = detail.content;
-  let response = build(content, detail.files);
-  if (JSON.stringify(response).length <= maxChars) return response;
+  const listed = JSON.stringify(detail.files).length;
+  if (content.length + listed <= maxChars) return build(content, detail.files);
 
   // File list first: it is the part that grows without bound.
   const omitted = detail.files.length;
-  response = build(content, [], `file list omitted to respect maxChars (${omitted} files)`);
-  if (JSON.stringify(response).length <= maxChars) return response;
-
-  const overflow = JSON.stringify(response).length - maxChars;
+  if (content.length <= maxChars) {
+    return build(content, [], `file list omitted to respect maxChars (${omitted} files)`);
+  }
   const suffix = '\n…[truncated]';
-  content = content.slice(0, Math.max(0, content.length - overflow - suffix.length)) + suffix;
+  content = content.slice(0, Math.max(0, maxChars - suffix.length)) + suffix;
   return build(content, [], `content truncated and ${omitted} file paths omitted to respect maxChars`);
 }
 
@@ -305,7 +306,11 @@ export class RequestHandlers {
   private resolveGuidance(task: string): string {
     const parts: string[] = [];
     try {
-      const prompts = buildGuidance(this.promptRegistry, task, this.discovery.getTools().map(t => t.name));
+      const prompts = buildGuidance(this.promptRegistry, task, this.discovery.getTools().flatMap((t) => {
+        // Prompts name tools by cell-prefixed address; discovery lists bare names.
+        const server = t.serverName ?? (t as { server?: string }).server;
+        return server ? [t.name, `${String(server).replace(/-/g, '_')}_${t.name}`] : [t.name];
+      }));
       if (prompts) parts.push(prompts);
     } catch { /* guidance never breaks the run */ }
     try {
@@ -969,8 +974,18 @@ export class RequestHandlers {
       case 'get_skill': {
         const file = typeof args.file === 'string' && args.file.trim() ? args.file.trim() : 'SKILL.md';
         const name = String(args.name || '');
-        const detail = catalog.get(name, undefined, file);
-        if (!detail) {
+        const found = catalog.lookup(name, undefined, file);
+        if (!found.ok) {
+          if (found.reason === 'path_not_allowed') {
+            return { ok: false, error: `path not allowed: '${file}'` };
+          }
+          if (found.reason === 'file_not_in_skill') {
+            return {
+              ok: false,
+              error: `file not in skill '${name}': '${file}' (available: ${(found.available ?? []).slice(0, 50).join(', ')})`,
+              available: (found.available ?? []).slice(0, 50),
+            };
+          }
           // A SKILL.md that failed to parse is not the same as a missing skill.
           const failures = catalog.parseFailures();
           return {
@@ -979,6 +994,7 @@ export class RequestHandlers {
             ...(failures.length ? { parseFailures: failures.slice(0, 5) } : {}),
           };
         }
+        const detail = found.detail as SkillDetail;
         const maxChars = Math.min(Math.max(Number(args.maxChars) || 8000, 500), 60000);
         return boundSkillResponse(detail, file, maxChars);
       }
@@ -1161,14 +1177,20 @@ export class RequestHandlers {
           filteredPrompts = filteredPrompts.filter(p => p.complexity.toLowerCase() === String(args.complexity).toLowerCase());
         }
 
-        // If specific keyword yielded 0 matches, return top related prompts so agent always gets useful templates
-        const results = filteredPrompts.length > 0 ? filteredPrompts : allPrompts.slice(0, 5);
+        // A category/complexity filter that matches nothing returns nothing: never
+        // substitute prompts from another category (chaining-mcp#28).
+        const filtered = Boolean(args.category || args.complexity);
+        const keywordMiss = Boolean(q) && !filtered && filteredPrompts.length === 0;
+        const results = keywordMiss ? allPrompts.slice(0, 5) : filteredPrompts;
 
         return {
           prompts: results,
           total: results.length,
           query: rawQ,
           matchedDirectly: filteredPrompts.length > 0,
+          ...(filtered && filteredPrompts.length === 0
+            ? { note: `no prompts match${args.category ? ` category '${args.category}'` : ''}${args.complexity ? ` complexity '${args.complexity}'` : ''}${rawQ ? ` for query '${rawQ}'` : ''}` }
+            : {}),
         };
       }
 
