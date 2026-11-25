@@ -173,7 +173,7 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `CHAINING_TOOL_TIMEOUT_MS` | `10000` | Interactive tool timeout; model-backed tools (`agent_run`, `brainstorming`, `analyze_with_sequential_thinking`, `suggest_skill_chain`, agent-fronted `sequentialthinking`) use their own budget instead (cap 300s) |
+| `CHAINING_TOOL_TIMEOUT_MS` | `10000` | Interactive tool timeout; model-backed tools (`agent_run`, `brainstorming`, `analyze_with_sequential_thinking`, `suggest_skill_chain`, `llm_suggest_route`, `generate_route_suggestions`, `llm_decompose_task`, agent-fronted `sequentialthinking`) use their own budget instead (default 90s, cap 300s; measured 4–7s on the 300-tool catalog with Needle) |
 | `MITOSIS_AGENT_ENABLED` | *auto* | On when `assets/needle/needle` exists; `false` opts out |
 | `NEEDLE_GENERATION` | `3` | Router generation: `3` (121M ladder, `--model` weights) or `2` (legacy 45M baked) |
 | `NEEDLE_DEPTH` | full | Gen-3 ladder rung 2..20 (e.g. `8` = 52M for small devices); invalid values fall back to full |

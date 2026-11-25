@@ -77,6 +77,7 @@ export class RequestHandlers {
     // inference + engine cold-start routinely exceed the interactive 10s).
     const modelBacked = name === 'agent_run' || name === 'brainstorming' ||
       name === 'analyze_with_sequential_thinking' || name === 'suggest_skill_chain' ||
+      name === 'llm_suggest_route' || name === 'generate_route_suggestions' || name === 'llm_decompose_task' ||
       (name === 'sequentialthinking' && isAgentEnabled());
     const timeoutMs = modelBacked
       ? Math.min(Number(args?.maxExecutionMs) || 90000, 300000)
