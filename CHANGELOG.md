@@ -16,14 +16,6 @@
 - The instruction `local_fallback` is always marked `status: degraded` with a notice describing the two heading-outline stubs, and the dangling `reactjs`/`nextjs` collection entries are removed.
 - `sequentialthinking` with `execute:false` records a `proposed_call` instead of a `tool_call`, so state no longer claims a call that did not happen.
 
-## [Unreleased]
-
-### Fixed
-- Prompt `expectedTools` name real HeLa tools. `run_terminal_cmd`, `grep`, `todo_write`, `search_replace`, `list_dir` and the `awesome_copilot_*` entries are mapped to `hela_nucleus_execute_command`, `hela_membrane_search_in_files`, `hela_genome_create_mission`, `hela_membrane_write_file`, `hela_membrane_list_directory` and `hela_mitosis_search_instructions`, or removed when no HeLa equivalent exists. A test now checks every entry against `config/tool-catalog.json`. (`chaining-mcp#27`)
-- `search_prompts` and `search_resource_sets` derive their `category` enum from the prompt/resource data instead of a six-value list, so all 20 prompt categories and 10 resource categories are reachable. (`chaining-mcp#27`)
-- The awesome-copilot local fallback is always reported as `status: "degraded"` with a warning, the bundled instructions are labelled heading-outline stubs, and collections no longer reference unloadable `reactjs`/`nextjs` entries. (`chaining-mcp#27`)
-- `sequentialthinking` with `execute: false` records a `proposed_call` instead of a `tool_call`, so state reports `toolCalls: 0` and `proposedCalls: 1` for a proposal. (`chaining-mcp#27`)
-
 ## [3.1.1] - 2026-11-22
 
 ### Changed
