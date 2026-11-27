@@ -1,3 +1,4 @@
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
@@ -179,6 +180,7 @@ export class NeedleProvider implements ModelProvider {
   }
 
   async health(): Promise<{ ok: boolean; detail?: string }> {
+    if (orchestratorMode().passive) return { ok: false, detail: 'disabled by MITOSIS_EXTERNAL_ORCHESTRATOR' };
     if (!this.config.enabled) return { ok: false, detail: 'MITOSIS_AGENT_ENABLED == false' };
     if (!existsSync(this.config.enginePath)) return { ok: false, detail: `engine missing: ${this.config.enginePath} (run npm run needle:fetch)` };
     // Tuned-model note: gen-3 engines take --model explicitly (weights are

@@ -15,7 +15,8 @@ import { AwesomeCopilotIntegration } from './integrations/awesome-copilot-integr
 import { WorkflowOrchestrator, type MCPTransport } from './managers/workflow-orchestrator.js';
 import { LLMManager } from './managers/llm-manager.js';
 
-import { allTools } from './tools/tool-registry.js';
+import { allTools, advertisedTools } from './tools/tool-registry.js';
+import { passiveRefusal } from './config/orchestrator-mode.js';
 import { chainingResources } from './resources/resource-definitions.js';
 import { ResourceHandlers } from './resources/resource-handlers.js';
 import { RequestHandlers } from './handlers/request-handlers.js';
@@ -115,13 +116,19 @@ export class ChainingMCPServer {
     // List tools handler
     server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: allTools,
+        tools: advertisedTools(),
       };
     });
 
     // Call tool handler
     server.setRequestHandler(CallToolRequestSchema, async (request, { signal }) => {
       const { name, arguments: args } = request.params;
+
+      // Before initialization: an omitted tool must not trigger discovery or any other side effect.
+      const refusal = passiveRefusal(name);
+      if (refusal) {
+        return { isError: true, content: [{ type: 'text', text: JSON.stringify(refusal, null, 2) }] };
+      }
 
       try {
         await this.ensureInitialized();

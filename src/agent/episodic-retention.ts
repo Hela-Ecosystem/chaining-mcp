@@ -12,6 +12,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 import { existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -136,7 +137,7 @@ export function retainWorkflowDecision(
 ): boolean {
   const opts: RetainWorkflowOptions = typeof options === 'string' ? { summary: options } : options;
   const dbPath = defaultMemoryDbPath();
-  if (!dbPath) return false;
+  if (!dbPath || orchestratorMode().passive) return false;
 
   // Gate 1: Do not retain runs with multiple tool errors/retries (dirty trails)
   if ((opts.errorCount ?? 0) > 2) {

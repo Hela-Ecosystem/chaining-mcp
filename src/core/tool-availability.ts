@@ -1,4 +1,5 @@
 import { ToolInfo } from '../types.js';
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 
 /**
  * Tool availability, with three outcomes instead of two.
@@ -41,6 +42,11 @@ export function checkToolAvailability(
     const tools = toolsForServer(step.serverName);
     if (!tools) {
       warnings.push(`Tool '${step.toolName}' could not be verified: server '${step.serverName}' was not discovered`);
+      continue;
+    }
+    // Passive mode launches no server, so a stand-in list cannot prove that a tool is absent.
+    if (!tools.has(step.toolName) && orchestratorMode().passive && [...tools.values()].every((tool) => tool.discoverySource === 'fallback')) {
+      warnings.push(`Tool '${step.toolName}' could not be verified: server '${step.serverName}' has only a fallback inventory in passive mode`);
       continue;
     }
     if (!tools.has(step.toolName)) {

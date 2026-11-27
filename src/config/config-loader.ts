@@ -1,3 +1,4 @@
+import { assertWritablePath } from './reserved-paths.js';
 import { readFile, access } from 'fs/promises';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
@@ -157,6 +158,6 @@ export class ConfigLoader {
    */
   async saveConfig(configPath: string): Promise<void> {
     const fs = await import('fs/promises');
-    await fs.writeFile(configPath, JSON.stringify(this.config, null, 2));
+    await fs.writeFile(assertWritablePath(configPath, 'discovery config'), JSON.stringify(this.config, null, 2));
   }
 }

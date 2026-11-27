@@ -1,7 +1,7 @@
 # Enterprise Chaining MCP Server (HeLa Mitosis)
 
 <!-- hela:version:start -->
-**MCP server:** `hela-mitosis` · **Version:** `3.1.3` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
+**MCP server:** `hela-mitosis` · **Version:** `3.2.0` · **Canonical tools:** 24–29 (feature-dependent). [Current tool reference](docs/TOOLS.md).
 <!-- hela:version:end -->
 
 > **Part of the [HeLa MCP Ecosystem](https://github.com/Hela-Ecosystem/hela-mcp-ecosystem)** — this server is **HeLa Mitosis (`hela-mitosis`)**, the *Orchestrator* component of the HeLa cellular architecture.
@@ -163,6 +163,27 @@ Thinking/generative: `brainstorming` (OpenRouter-backed, key required), `workflo
 Time: `get_current_time`, `convert_time`. Prompt/resource: `get_prompt`, `search_prompts`, `get_resource_set`, `search_resource_sets`. Validation: `validate_tool_chain`, `analyze_tool_chain_performance`. Skills: `list_skills`, `search_skills`, `get_skill`, `suggest_skill_chain`.
 LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Needle-planned), `llm_summarize` — listed by default (`CHAINING_LLM_ENABLED` defaults true); the keyless `llm_*` tools fail honestly or fall back to truncation, never fake answers. Set `CHAINING_LLM_ENABLED=false` to hide them.
 
+## Passive mode (external orchestrators)
+
+Set `MITOSIS_EXTERNAL_ORCHESTRATOR` when an external DAG coordinator (for example `meta7`) owns scheduling, retries and state. Any non-empty value turns passive mode on and is kept as the coordinator's name; unset or blank keeps the autonomous behaviour.
+
+```sh
+export MITOSIS_EXTERNAL_ORCHESTRATOR=meta7   # or any other name, such as "passive"
+```
+
+| | Tools |
+|---|---|
+| Available | `list_mcp_servers`, `analyze_tools`, `get_tool_chain_analysis`, `validate_tool_chain`, `analyze_tool_chain_performance`, `get_current_time`, `convert_time`, `search_instructions`, `load_instruction`, `get_prompt`, `search_prompts`, `get_resource_set`, `search_resource_sets`, `list_skills`, `search_skills`, `get_skill` |
+| With `CHAINING_LLM_ENABLED` (default on) | `llm_query`, `llm_summarize` |
+| Omitted | `agent_run`, `workflow_orchestrator`, `workflow_status`, `workflow_cancel`, `sequentialthinking`, `analyze_with_sequential_thinking`, `generate_route_suggestions`, `suggest_skill_chain`, `brainstorming`, `llm_decompose_task`, `llm_suggest_route`, and any tool added later until it is allow-listed |
+
+- A direct call to an omitted tool returns `isError: true` with `{"ok": false, "code": "MITOSIS_PASSIVE_MODE", ...}` before any initialization.
+- The agent is off even with `MITOSIS_AGENT_ENABLED=true`; no Needle process starts. `HELA_PROFILE` and `HELA_POLICY_PROFILE` have no effect on the filter.
+- Discovery launches no configured MCP server; those servers are described from the runtime catalog and static fallbacks, and the instruction tools use their local copies.
+- Run state is kept in memory, whatever `HELA_RUNSTORE_PATH` says. Mitosis-owned writes into `.state.graph/`, `scratchs/`, `researchs/`, `designs/`, `provness/` or `ref/` are refused with `MITOSIS_RESERVED_PATH`. The workspace is `MITOSIS_WORKSPACE_ROOT`, else `HELA_WORKSPACE_ROOT`, else the working directory; set one of these when a host starts Mitosis elsewhere.
+- `/healthz` keeps its fields and adds `mode` and `externalOrchestrator`.
+- Under `hela-runtime` (1.5.0 or later) the same variable also hides `hela.agent.run` and `hela.pipe`.
+
 ## Resources (18)
 
 `chaining://servers`, `tools`, `analysis`, `prompts`, `resources`, `prompts/overview`, `awesome-copilot/collections`, `awesome-copilot/instructions`, `awesome-copilot/status`, `sequential/state`, `workflows/status`, `tool-chains`, `tool-chains/overview`, `health`, `cache/stats`, `llm/status`, `llm/usage`, `agent/status`.
@@ -170,6 +191,8 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 ---
 
 ## Environment Variables
+
+`MITOSIS_EXTERNAL_ORCHESTRATOR` and `MITOSIS_WORKSPACE_ROOT` control [passive mode](#passive-mode-external-orchestrators).
 
 | Variable | Default | Meaning |
 |----------|---------|---------|

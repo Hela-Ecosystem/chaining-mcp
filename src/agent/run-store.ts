@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 import { resolve } from 'path';
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
@@ -48,8 +49,13 @@ export class RunStore {
   private db: DatabaseSync;
 
   constructor(path?: string) {
-    const file = path || process.env['HELA_RUNSTORE_PATH'] || resolve(process.cwd(), 'hela-runs.db');
+    // Passive mode keeps no durable state: nothing may appear in the coordinator's workspace.
+    const file = orchestratorMode().passive
+      ? ':memory:'
+      : path || process.env['HELA_RUNSTORE_PATH'] || resolve(process.cwd(), 'hela-runs.db');
     this.db = new DatabaseSync(file);
+    // Another process may hold the file for a moment; wait instead of failing with "database is locked".
+    this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS runs (

@@ -1,4 +1,5 @@
 import { checkToolAvailability, indexToolsByServer } from '../core/tool-availability.js';
+import { orchestratorMode, passiveRefusal } from '../config/orchestrator-mode.js';
 import { spawn } from 'child_process';
 import { MCPServerDiscovery } from '../core/discovery.js';
 import { SmartRouteOptimizer } from '../core/optimizer.js';
@@ -72,6 +73,8 @@ export class RequestHandlers {
   ) {}
 
   async handleToolCall(name: string, args: any, signal?: AbortSignal): Promise<any> {
+    const refusal = passiveRefusal(name);
+    if (refusal) return refusal;
     const defaultMs = parseInt(process.env.CHAINING_TOOL_TIMEOUT_MS || '10000', 10);
     // Model-backed tools carry their own budget (planning + multi-turn
     // inference + engine cold-start routinely exceed the interactive 10s).
@@ -495,8 +498,8 @@ export class RequestHandlers {
     const awesomeCopilotServer = this.discovery.getServers().find(server => server.name === 'awesome-copilot');
     const githubToken = awesomeCopilotServer?.env?.GITHUB__TOKEN || process.env.GITHUB_TOKEN || process.env.GITHUB__TOKEN;
 
-    // If external server and token are configured, attempt remote call first
-    if (awesomeCopilotServer && githubToken && githubToken !== 'your_github_token_here') {
+    // If external server and token are configured, attempt remote call first (never in passive mode: it launches a process)
+    if (!orchestratorMode().passive && awesomeCopilotServer && githubToken && githubToken !== 'your_github_token_here') {
       try {
         const result = await this.executeAwesomeCopilotTool(awesomeCopilotServer, name, args);
         if (result && !result.error) {

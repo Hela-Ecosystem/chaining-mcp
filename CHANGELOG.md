@@ -1,4 +1,9 @@
 # Changelog
+## [3.2.0] - 2026-11-27
+
+### Added
+- Passive mode for external DAG coordinators: `MITOSIS_EXTERNAL_ORCHESTRATOR` limits `tools/list` and dispatch to an explicit allow-list, refuses other tools with `MITOSIS_PASSIVE_MODE`, keeps the agent and Needle off, launches no configured MCP server during discovery or instruction lookups, keeps run state in memory, refuses writes into coordinator-owned workspace directories (`MITOSIS_RESERVED_PATH`), and adds `mode` and `externalOrchestrator` to `/healthz`. Unset, behaviour is unchanged. (`chaining-mcp#30`)
+
 ## [3.1.3] - 2026-11-25
 
 ### Fixed
