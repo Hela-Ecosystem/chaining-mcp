@@ -1,5 +1,5 @@
-import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
+import { lstatSync, readlinkSync } from 'node:fs';
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { orchestratorMode } from './orchestrator-mode.js';
 
 /** Directories an external coordinator owns inside its workspace (chaining-mcp#30). */
@@ -20,28 +20,37 @@ export function workspaceRoot(env: NodeJS.ProcessEnv = process.env): string {
 
 const MAX_SYMLINK_HOPS = 40;
 
-function linkDestination(path: string): string | undefined {
+function symlinkText(path: string): string | undefined {
   try {
-    return lstatSync(path).isSymbolicLink() ? resolve(dirname(path), readlinkSync(path)) : undefined;
+    return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : undefined;
   } catch {
-    return undefined;
+    return undefined; // does not exist yet: nothing to follow
   }
 }
 
 /**
- * Where a write to `target` would really land: symlinks are followed in the part that exists, including a
- * link whose destination does not exist yet. A chain too long to follow cannot be verified, so it throws.
+ * Where the filesystem would put a write to `target`, resolved one component at a time as the kernel does:
+ * a symlink is expanded before any following "..", a relative link is read from its real parent, and a link
+ * whose destination does not exist yet is still followed. A chain too long to follow cannot be verified.
  */
-function realTarget(target: string, hops = 0): string {
-  try {
-    return realpathSync(target);
-  } catch {
-    if (hops > MAX_SYMLINK_HOPS) throw new Error(`cannot verify the destination of '${target}'`);
-    const destination = linkDestination(target);
-    if (destination) return realTarget(destination, hops + 1);
-    const parent = dirname(target);
-    return parent === target ? target : join(realTarget(parent, hops), basename(target));
+export function destinationOf(target: string): string {
+  const absolute = isAbsolute(target) ? target : `${process.cwd()}${sep}${target}`;
+  const { root } = parse(absolute);
+  const pending = absolute.slice(root.length).split(sep);
+  let current = root;
+  let hops = 0;
+  while (pending.length) {
+    const part = pending.shift() as string;
+    if (!part || part === '.') continue;
+    if (part === '..') { current = dirname(current); continue; }
+    const next = join(current, part);
+    const link = symlinkText(next);
+    if (link === undefined) { current = next; continue; }
+    if (++hops > MAX_SYMLINK_HOPS) throw new Error(`cannot verify the destination of '${target}'`);
+    if (isAbsolute(link)) current = parse(link).root;
+    pending.unshift(...(isAbsolute(link) ? link.slice(parse(link).root.length) : link).split(sep));
   }
+  return current;
 }
 
 function reservedSegment(root: string, target: string): string | undefined {
@@ -51,14 +60,16 @@ function reservedSegment(root: string, target: string): string | undefined {
 }
 
 /**
- * Passive mode only: refuses a write whose path, as written or after following
- * symlinks, lands in a reserved directory of the workspace.
+ * Returns the path to write to. In passive mode that is the verified destination, refused when the path as
+ * written or its destination lies in a reserved directory of the workspace; callers must write to the
+ * returned path. The check is not atomic against another process changing links at the same moment.
  */
-export function assertWritablePath(target: string, purpose: string, env: NodeJS.ProcessEnv = process.env): void {
-  if (!orchestratorMode(env).passive) return;
+export function assertWritablePath(target: string, purpose: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (!orchestratorMode(env).passive) return target;
   const root = workspaceRoot(env);
-  // Relative writes land relative to the process, whatever the workspace root is.
   const written = resolve(target);
-  const segment = reservedSegment(root, written) ?? reservedSegment(realTarget(root), realTarget(written));
+  const destination = destinationOf(target);
+  const segment = reservedSegment(root, written) ?? reservedSegment(destinationOf(root), destination);
   if (segment) throw new ReservedPathError(written, segment, purpose);
+  return destination;
 }

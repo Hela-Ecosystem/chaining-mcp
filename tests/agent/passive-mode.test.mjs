@@ -1,7 +1,7 @@
 // chaining-mcp#30: passive mode for external DAG coordinators.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
@@ -13,6 +13,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { orchestratorMode, isToolAllowed } from './.dist/config/orchestrator-mode.js';
 import { assertWritablePath, ReservedPathError } from './.dist/config/reserved-paths.js';
 import { RunStore } from './.dist/agent/run-store.js';
+import { checkToolAvailability } from './.dist/core/tool-availability.js';
 import { isAgentEnabled } from './.dist/agent/diagnostics.js';
 import { ChainingMCPServer } from './.dist/server.js';
 
@@ -79,6 +80,16 @@ describe('orchestrator mode resolution', () => {
   });
 });
 
+test('a fallback-only inventory is unverified in passive mode and unchanged otherwise', async () => {
+  const chain = [{ serverName: 'hela-membrane', toolName: 'read_file' }];
+  const inventory = [{ name: 'other', serverName: 'hela-membrane', discoverySource: 'fallback' }];
+  await withEnv({ MITOSIS_EXTERNAL_ORCHESTRATOR: 'meta7' }, () => {
+    const result = checkToolAvailability(chain, inventory);
+    assert.deepEqual([result.errors.length, result.warnings.length], [0, 1]);
+  });
+  await withEnv({ MITOSIS_EXTERNAL_ORCHESTRATOR: undefined }, () => assert.equal(checkToolAvailability(chain, inventory).errors.length, 1));
+});
+
 describe('reserved coordinator paths', () => {
   test('segments, traversal and symlinks are refused; look-alikes are not', async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'mitosis-reserved-'));
@@ -99,6 +110,17 @@ describe('reserved coordinator paths', () => {
       for (const target of [at('reference/x'), at('src/refs.json'), at('memory.db'), path.join(os.tmpdir(), 'ref', 'outside')]) {
         assert.doesNotThrow(() => assertWritablePath(target, 'test', env), target);
       }
+      // Filesystem order: ".." applies after the link before it, and a relative link is read from its real parent.
+      mkdirSync(path.join(root, 'ref', 'deep'));
+      symlinkSync(path.join(root, 'ref', 'deep'), path.join(root, 'src', 'into-ref'));
+      symlinkSync('../pending.json', path.join(root, 'ref', 'deep', 'rel-dangling'));
+      for (const target of [`${root}/src/into-ref/../x.json`, `${root}/src/into-ref/rel-dangling`]) {
+        assert.throws(() => assertWritablePath(target, 'test', env), ReservedPathError, target);
+      }
+      symlinkSync('loop', path.join(root, 'src', 'loop'));
+      assert.throws(() => assertWritablePath(`${root}/src/loop`, 'test', env), /cannot verify/);
+      symlinkSync(path.join(root, 'reference'), path.join(root, 'src', 'safe'));
+      assert.equal(assertWritablePath(`${root}/src/safe/x`, 'test', env), path.join(realpathSync(root), 'reference', 'x'));
       // A relative path is where the process would write it, and a blank override falls back to cwd.
       const previous = process.cwd();
       process.chdir(at('ref'));

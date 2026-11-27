@@ -45,8 +45,7 @@ export class KnowledgeGraphManager {
       ...graph.entities.map(e => JSON.stringify({ type: "entity", ...e })),
       ...graph.relations.map(r => JSON.stringify({ type: "relation", ...r })),
     ];
-    assertWritablePath(MEMORY_FILE_PATH, 'MEMORY_FILE_PATH');
-    await fs.writeFile(MEMORY_FILE_PATH, lines.join("\n"));
+    await fs.writeFile(assertWritablePath(MEMORY_FILE_PATH, 'MEMORY_FILE_PATH'), lines.join("\n"));
   }
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {

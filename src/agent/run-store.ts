@@ -54,6 +54,8 @@ export class RunStore {
       ? ':memory:'
       : path || process.env['HELA_RUNSTORE_PATH'] || resolve(process.cwd(), 'hela-runs.db');
     this.db = new DatabaseSync(file);
+    // Another process may hold the file for a moment; wait instead of failing with "database is locked".
+    this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
