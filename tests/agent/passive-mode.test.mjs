@@ -3,6 +3,8 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
+import { once } from 'node:events';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -85,15 +87,29 @@ describe('reserved coordinator paths', () => {
       symlinkSync(path.join(root, 'ref'), path.join(root, 'src', 'link'));
       symlinkSync(path.join(root, 'src'), path.join(root, 'designs', 'out'));
       const env = { MITOSIS_EXTERNAL_ORCHESTRATOR: 'meta7', MITOSIS_WORKSPACE_ROOT: root };
+      // Links whose destination does not exist yet, directly and through a second link.
+      symlinkSync(path.join(root, 'ref', 'not-yet.json'), path.join(root, 'src', 'dangling'));
+      symlinkSync('dangling', path.join(root, 'src', 'chain'));
+      const at = (relative) => `${root}/${relative}`;
       const refused = [
-        ...RESERVED.map((dir) => `${dir}/file.db`), path.join(root, 'ref', 'a', 'b.json'),
-        'src/../ref/x', 'src/link/x', 'designs/out/x', 'nested/scratchs/x',
+        ...RESERVED.map((dir) => at(`${dir}/file.db`)), at('ref/a/b.json'),
+        at('src/../ref/x'), at('src/link/x'), at('designs/out/x'), at('nested/scratchs/x'), at('src/dangling'), at('src/chain'),
       ];
       for (const target of refused) assert.throws(() => assertWritablePath(target, 'test', env), ReservedPathError, target);
-      for (const target of ['reference/x', 'src/refs.json', 'memory.db', path.join(os.tmpdir(), 'ref', 'outside')]) {
+      for (const target of [at('reference/x'), at('src/refs.json'), at('memory.db'), path.join(os.tmpdir(), 'ref', 'outside')]) {
         assert.doesNotThrow(() => assertWritablePath(target, 'test', env), target);
       }
-      assert.doesNotThrow(() => assertWritablePath('ref/x', 'test', { MITOSIS_WORKSPACE_ROOT: root }), 'autonomous mode is unchanged');
+      // A relative path is where the process would write it, and a blank override falls back to cwd.
+      const previous = process.cwd();
+      process.chdir(at('ref'));
+      try {
+        assert.throws(() => assertWritablePath('x.json', 'test', env), ReservedPathError);
+        process.chdir(root);
+        assert.throws(() => assertWritablePath('ref/x', 'test', { ...env, MITOSIS_WORKSPACE_ROOT: '   ' }), ReservedPathError);
+      } finally {
+        process.chdir(previous);
+      }
+      assert.doesNotThrow(() => assertWritablePath(at('ref/x'), 'test', { MITOSIS_WORKSPACE_ROOT: root }), 'autonomous mode is unchanged');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -116,10 +132,21 @@ describe('reserved coordinator paths', () => {
   });
 });
 
-async function connectStdio(cwd, env) {
+async function connectStdio(cwd, env, log) {
   const client = new Client({ name: 'passive-test', version: '1.0.0' });
-  await client.connect(new StdioClientTransport({ command: process.execPath, args: [ENTRY], cwd, env: { PATH: process.env.PATH, HOME: cwd, ...env }, stderr: 'ignore' }));
+  const transport = new StdioClientTransport({ command: process.execPath, args: [ENTRY], cwd, env: { PATH: process.env.PATH, HOME: cwd, ...env }, stderr: log ? 'pipe' : 'ignore' });
+  if (log) transport.stderr.on('data', (chunk) => log.push(String(chunk)));
+  await client.connect(transport);
   return client;
+}
+
+async function freePort() {
+  const probe = createServer().listen(0, '127.0.0.1');
+  await once(probe, 'listening');
+  const { port } = probe.address();
+  probe.close();
+  await once(probe, 'close');
+  return port;
 }
 
 const names = async (client) => (await client.listTools()).tools.map((tool) => tool.name).sort();
@@ -149,11 +176,15 @@ describe('passive server over stdio', () => {
           ['trap', 'awesome-copilot'].map((name) => [name, { command: engine, args: [] }]),
         ) }));
         const before = snapshot(workspace);
+        const log = [];
         const client = await connectStdio(workspace, {
           MITOSIS_EXTERNAL_ORCHESTRATOR: 'meta7', MITOSIS_AGENT_ENABLED: 'true', CHAINING_LLM_ENABLED: llm,
           NEEDLE_ENGINE_PATH: engine, NEEDLE_MODEL_PATH: engine, AGENT_ESCALATION_ENABLED: 'false', GITHUB_TOKEN: 'fixture-token',
-        });
+        }, log);
         try {
+          // The very first call is a refused one: it must not start discovery.
+          assert.equal((await client.callTool({ name: 'agent_run', arguments: { task: 'x' } })).isError, true);
+          assert.doesNotMatch(log.join(''), /Initializing chaining MCP server/);
           assert.deepEqual(await names(client), [...ALLOWED, ...(llm === 'true' ? LLM : [])].sort());
           for (const name of ALLOWED) {
             const result = await client.callTool({ name, arguments: SAMPLE_ARGS[name] ?? {} });
@@ -201,7 +232,9 @@ describe('passive server over HTTP', () => {
   test('same filtering and refusal, and healthz only adds fields', async () => {
     await withEnv({ MITOSIS_EXTERNAL_ORCHESTRATOR: 'passive', CHAINING_LLM_ENABLED: 'true' }, async () => {
       const server = new ChainingMCPServer();
-      const port = 8993;
+      const port = await freePort();
+      const logged = [];
+      const original = console.error;
       await server.start({ transport: 'http', port, host: '127.0.0.1' });
       const client = new Client({ name: 'passive-http', version: '1.0.0' });
       try {
@@ -210,14 +243,16 @@ describe('passive server over HTTP', () => {
         assert.deepEqual([health.status, health.mode, health.externalOrchestrator], ['ok', 'passive', 'passive']);
         await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
         assert.deepEqual(await names(client), [...ALLOWED, ...LLM].sort());
+        console.error = (...args) => logged.push(args.join(' '));
         for (const name of OMITTED) {
           const result = await client.callTool({ name, arguments: {} });
           assert.equal(result.isError, true, name);
           assert.equal(JSON.parse(result.content[0].text).code, 'MITOSIS_PASSIVE_MODE', name);
         }
+        assert.doesNotMatch(logged.join('\n'), /Initializing chaining MCP server/);
       } finally {
-        await client.close();
-        await server.stop();
+        console.error = original;
+        try { await client.close(); } finally { await server.stop(); }
       }
     });
   });

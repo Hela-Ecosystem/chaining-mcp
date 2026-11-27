@@ -168,8 +168,7 @@ LLM: `llm_query`, `llm_decompose_task` (Needle-planned), `llm_suggest_route` (Ne
 Set `MITOSIS_EXTERNAL_ORCHESTRATOR` when an external DAG coordinator (for example `meta7`) owns scheduling, retries and state. Any non-empty value turns passive mode on and is kept as the coordinator's name; unset or blank keeps the autonomous behaviour.
 
 ```sh
-MITOSIS_EXTERNAL_ORCHESTRATOR=meta7
-MITOSIS_EXTERNAL_ORCHESTRATOR=passive
+export MITOSIS_EXTERNAL_ORCHESTRATOR=meta7   # or any other name, such as "passive"
 ```
 
 | | Tools |

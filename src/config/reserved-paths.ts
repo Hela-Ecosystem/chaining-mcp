@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { orchestratorMode } from './orchestrator-mode.js';
 
@@ -15,16 +15,32 @@ export class ReservedPathError extends Error {
 
 /** Hosts such as hela-runtime start cells in their install directory, so cwd is only the last resort. */
 export function workspaceRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return resolve(env.MITOSIS_WORKSPACE_ROOT || env.HELA_WORKSPACE_ROOT || process.cwd());
+  return resolve(env.MITOSIS_WORKSPACE_ROOT?.trim() || env.HELA_WORKSPACE_ROOT?.trim() || process.cwd());
 }
 
-/** Resolves symlinks in the part of the path that exists and keeps the rest as written. */
-function realTarget(target: string): string {
+const MAX_SYMLINK_HOPS = 40;
+
+function linkDestination(path: string): string | undefined {
+  try {
+    return lstatSync(path).isSymbolicLink() ? resolve(dirname(path), readlinkSync(path)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Where a write to `target` would really land: symlinks are followed in the part that exists, including a
+ * link whose destination does not exist yet. A chain too long to follow cannot be verified, so it throws.
+ */
+function realTarget(target: string, hops = 0): string {
   try {
     return realpathSync(target);
   } catch {
+    if (hops > MAX_SYMLINK_HOPS) throw new Error(`cannot verify the destination of '${target}'`);
+    const destination = linkDestination(target);
+    if (destination) return realTarget(destination, hops + 1);
     const parent = dirname(target);
-    return parent === target ? target : join(realTarget(parent), basename(target));
+    return parent === target ? target : join(realTarget(parent, hops), basename(target));
   }
 }
 
@@ -41,7 +57,8 @@ function reservedSegment(root: string, target: string): string | undefined {
 export function assertWritablePath(target: string, purpose: string, env: NodeJS.ProcessEnv = process.env): void {
   if (!orchestratorMode(env).passive) return;
   const root = workspaceRoot(env);
-  const written = resolve(root, target);
+  // Relative writes land relative to the process, whatever the workspace root is.
+  const written = resolve(target);
   const segment = reservedSegment(root, written) ?? reservedSegment(realTarget(root), realTarget(written));
   if (segment) throw new ReservedPathError(written, segment, purpose);
 }

@@ -2,7 +2,7 @@
 
 Server version **3.2.0**. Generated from the ecosystem schema catalog; regenerate with `npm run docs:generate -- --servers` in the ecosystem checkout.
 
-Only names advertised by `tools/list` are listed here. Older aliases in migration examples are not additional tools. Runtime namespace prefixes are optional and do not change these server-local names.
+With `MITOSIS_EXTERNAL_ORCHESTRATOR` set, only the [passive subset](../README.md#passive-mode-external-orchestrators) is advertised. Only names advertised by `tools/list` are listed here. Older aliases in migration examples are not additional tools. Runtime namespace prefixes are optional and do not change these server-local names.
 
 ## `agent_run` (conditional)
 

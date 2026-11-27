@@ -29,7 +29,7 @@ export function orchestratorMode(env: NodeJS.ProcessEnv = process.env): Orchestr
 export function isToolAllowed(name: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!orchestratorMode(env).passive) return true;
   if (PASSIVE_TOOLS.has(name)) return true;
-  return PASSIVE_LLM_TOOLS.has(name) && (env.CHAINING_LLM_ENABLED || 'true').toLowerCase() !== 'false';
+  return PASSIVE_LLM_TOOLS.has(name) && (env.CHAINING_LLM_ENABLED || 'true').trim().toLowerCase() !== 'false';
 }
 
 /** The structured refusal for a tool omitted in passive mode, or null when the call may proceed. */
