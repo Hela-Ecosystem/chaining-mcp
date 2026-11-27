@@ -143,10 +143,15 @@ describe('passive server over stdio', () => {
         }
         writeFileSync(engine, `#!/bin/sh\ntouch '${marker}'\n`);
         chmodSync(engine, 0o755);
+        // Client configs name other MCP servers; a passive server must not launch any of them.
+        mkdirSync(path.join(workspace, '.config', 'mcp'), { recursive: true });
+        writeFileSync(path.join(workspace, '.config', 'mcp', 'servers.json'), JSON.stringify({ mcpServers: Object.fromEntries(
+          ['trap', 'awesome-copilot'].map((name) => [name, { command: engine, args: [] }]),
+        ) }));
         const before = snapshot(workspace);
         const client = await connectStdio(workspace, {
           MITOSIS_EXTERNAL_ORCHESTRATOR: 'meta7', MITOSIS_AGENT_ENABLED: 'true', CHAINING_LLM_ENABLED: llm,
-          NEEDLE_ENGINE_PATH: engine, NEEDLE_MODEL_PATH: engine, AGENT_ESCALATION_ENABLED: 'false',
+          NEEDLE_ENGINE_PATH: engine, NEEDLE_MODEL_PATH: engine, AGENT_ESCALATION_ENABLED: 'false', GITHUB_TOKEN: 'fixture-token',
         });
         try {
           assert.deepEqual(await names(client), [...ALLOWED, ...(llm === 'true' ? LLM : [])].sort());
@@ -168,7 +173,7 @@ describe('passive server over stdio', () => {
           await client.close();
         }
         assert.deepEqual(snapshot(workspace), before);
-        assert.ok(!existsSync(marker), 'the Needle engine was started');
+        assert.ok(!existsSync(marker), 'a process (Needle engine or configured server) was started');
       } finally {
         rmSync(scratch, { recursive: true, force: true });
       }

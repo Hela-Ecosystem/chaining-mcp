@@ -180,6 +180,7 @@ MITOSIS_EXTERNAL_ORCHESTRATOR=passive
 
 - A direct call to an omitted tool returns `isError: true` with `{"ok": false, "code": "MITOSIS_PASSIVE_MODE", ...}` before any initialization.
 - The agent is off even with `MITOSIS_AGENT_ENABLED=true`; no Needle process starts. `HELA_PROFILE` and `HELA_POLICY_PROFILE` have no effect on the filter.
+- Discovery launches no configured MCP server; those servers are described from the runtime catalog and static fallbacks, and the instruction tools use their local copies.
 - Run state is kept in memory, whatever `HELA_RUNSTORE_PATH` says. Mitosis-owned writes into `.state.graph/`, `scratchs/`, `researchs/`, `designs/`, `provness/` or `ref/` are refused with `MITOSIS_RESERVED_PATH`. The workspace is `MITOSIS_WORKSPACE_ROOT`, else `HELA_WORKSPACE_ROOT`, else the working directory; set one of these when a host starts Mitosis elsewhere.
 - `/healthz` keeps its fields and adds `mode` and `externalOrchestrator`.
 - Under `hela-runtime` (1.5.0 or later) the same variable also hides `hela.agent.run` and `hela.pipe`.

@@ -3,6 +3,7 @@ import { readFile, readdir, stat, access } from 'fs/promises';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { spawn, ChildProcess } from 'child_process';
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 import { MCPServerInfo, ToolInfo, MCPServerInfoSchema } from '../types.js';
 import { ConfigLoader } from '../config/config-loader.js';
 import { DiscoveryConfig, EssentialServerConfig, FallbackToolConfig } from '../config/discovery-config.js';
@@ -312,6 +313,9 @@ export class MCPServerDiscovery {
    */
   private async extractToolsFromServer(serverName: string, serverInfo: MCPServerInfo): Promise<ToolInfo[]> {
     const tools: ToolInfo[] = [];
+
+    // Passive mode launches nothing: a configured server could start work or write into the coordinator's workspace.
+    if (orchestratorMode().passive) return this.getFallbackTools(serverName, serverInfo);
 
     try {
       // Try to connect to the server and query its tools
