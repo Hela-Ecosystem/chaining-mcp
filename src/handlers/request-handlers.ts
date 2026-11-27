@@ -1,4 +1,5 @@
 import { checkToolAvailability, indexToolsByServer } from '../core/tool-availability.js';
+import { passiveRefusal } from '../config/orchestrator-mode.js';
 import { spawn } from 'child_process';
 import { MCPServerDiscovery } from '../core/discovery.js';
 import { SmartRouteOptimizer } from '../core/optimizer.js';
@@ -72,6 +73,8 @@ export class RequestHandlers {
   ) {}
 
   async handleToolCall(name: string, args: any, signal?: AbortSignal): Promise<any> {
+    const refusal = passiveRefusal(name);
+    if (refusal) return refusal;
     const defaultMs = parseInt(process.env.CHAINING_TOOL_TIMEOUT_MS || '10000', 10);
     // Model-backed tools carry their own budget (planning + multi-turn
     // inference + engine cold-start routinely exceed the interactive 10s).

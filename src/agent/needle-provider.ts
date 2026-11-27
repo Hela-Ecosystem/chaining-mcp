@@ -1,3 +1,4 @@
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
@@ -54,7 +55,7 @@ export function needleConfigFromEnv(): NeedleConfig {
   const depthRaw = process.env.NEEDLE_DEPTH;
   const depth = depthRaw !== undefined ? Number(depthRaw) : undefined;
   return {
-    enabled: (process.env.MITOSIS_AGENT_ENABLED || 'true').toLowerCase() !== 'false',
+    enabled: !orchestratorMode().passive && (process.env.MITOSIS_AGENT_ENABLED || 'true').toLowerCase() !== 'false',
     enginePath: process.env.NEEDLE_ENGINE_PATH || defaults.enginePath,
     modelPath: process.env.NEEDLE_MODEL_PATH || defaults.modelPath,
     confidenceThreshold: parseFloat(process.env.NEEDLE_CONFIDENCE_THRESHOLD || '0.6'),
@@ -179,7 +180,7 @@ export class NeedleProvider implements ModelProvider {
   }
 
   async health(): Promise<{ ok: boolean; detail?: string }> {
-    if (!this.config.enabled) return { ok: false, detail: 'MITOSIS_AGENT_ENABLED == false' };
+    if (!this.config.enabled) return { ok: false, detail: orchestratorMode().passive ? 'disabled by MITOSIS_EXTERNAL_ORCHESTRATOR' : 'MITOSIS_AGENT_ENABLED == false' };
     if (!existsSync(this.config.enginePath)) return { ok: false, detail: `engine missing: ${this.config.enginePath} (run npm run needle:fetch)` };
     // Tuned-model note: gen-3 engines take --model explicitly (weights are
     // not baked in); gen-2 bakes the base model in. NEEDLE_MODEL_PATH /

@@ -3,12 +3,19 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { RunStore } from '../agent/run-store.js';
 import { MCP_SERVER_VERSION } from '../version.js';
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 
 export interface HttpAdapterOptions {
   port?: number;
   host?: string;
   runStore?: RunStore;
   serverFactory?: () => Server;
+}
+
+/** Additive health fields, present only in passive mode so the autonomous payload is unchanged. */
+function passiveFields(): Record<string, unknown> {
+  const { passive, externalOrchestrator } = orchestratorMode();
+  return passive ? { mode: 'passive', externalOrchestrator } : {};
 }
 
 /**
@@ -57,6 +64,7 @@ export class HttpAdapter {
             transport: 'stateless-http',
             version: MCP_SERVER_VERSION,
             protocolVersion: '2026-07-28',
+            ...passiveFields(),
           }));
           return;
         }

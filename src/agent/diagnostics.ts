@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { orchestratorMode } from '../config/orchestrator-mode.js';
 
 /**
  * Agent enablement: the Needle engine is bundled (assets/needle), so the
@@ -11,6 +12,8 @@ export function bundledEnginePath(): string {
 }
 
 export function isAgentEnabled(): boolean {
+  // An external orchestrator owns the control plane, whatever MITOSIS_AGENT_ENABLED says.
+  if (orchestratorMode().passive) return false;
   if ((process.env.MITOSIS_AGENT_ENABLED || '').toLowerCase() === 'false') return false;
   if ((process.env.MITOSIS_AGENT_ENABLED || '').toLowerCase() === 'true') return true;
   return existsSync(bundledEnginePath());
